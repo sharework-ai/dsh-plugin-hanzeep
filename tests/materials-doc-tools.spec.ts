@@ -18,6 +18,13 @@ describe('materials', () => {
     expect(await readMaterials(['req.md'], root)).toEqual(['需求内容'])
   })
 
+  it('reads CJK and space filenames (test-plan edge case)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hanzeep-ws-'))
+    await mkdir(join(root, '子 目录'), { recursive: true })
+    await writeFile(join(root, '子 目录', '需求 素材.md'), ' spaced content ', 'utf8')
+    expect(await readMaterials(['子 目录/需求 素材.md'], root)).toEqual([' spaced content '])
+  })
+
   it('rejects path traversal outside the workspace root', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hanzeep-ws-'))
     await expect(readMaterials(['../../etc/passwd'], root)).rejects.toThrow(/escapes the workspace root/)
