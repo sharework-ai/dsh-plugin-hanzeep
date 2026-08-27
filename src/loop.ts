@@ -1,5 +1,5 @@
 import type { Issue } from './issue.ts'
-import { issueFingerprint } from './issue.ts'
+import { issueFingerprint, isAbortError, severityCounts } from './issue.ts'
 import type { LlmPort } from './llm-port.ts'
 import { withSingleRetry } from './llm-port.ts'
 import { assembleGeneratorPrompt, assembleRepairPrompt, estimateTokens, extractJson } from './prompt.ts'
@@ -50,16 +50,6 @@ export interface LoopExhausted {
 
 export type LoopResult = LoopSuccess | LoopExhausted
 
-function severityCounts(issues: readonly Issue[]): { errors: number; warnings: number } {
-  let errors = 0
-  let warnings = 0
-  for (const i of issues) {
-    if (i.severity === 'error') errors++
-    else if (i.severity === 'warning') warnings++
-  }
-  return { errors, warnings }
-}
-
 /**
  * The closed repair loop: generate → validate → repair-until-green.
  * Oscillation guard: two consecutive rounds with an unchanged issue
@@ -77,11 +67,12 @@ export async function runRepairLoop(
   let repeatedCount = 0
 
   let artifact: unknown
-  let request = assembleGeneratorPrompt({
+  const originalRequest = assembleGeneratorPrompt({
     promptTemplate: options.promptTemplate,
     materials: options.materials,
     upstream: options.upstream,
   })
+  let request = originalRequest
   let iterations = 0
 
   while (iterations < options.maxIterations) {
@@ -96,7 +87,7 @@ export async function runRepairLoop(
     try {
       text = await withSingleRetry(() => options.llm.complete({ system: '', user: request, signal: options.signal }))
     } catch (error) {
-      if ((error as Error).name === 'AbortError') throw error
+      if (isAbortError(error)) throw error
       const llmIssues: Issue[] = [{
         ruleId: INTERNAL_LLM_ERROR,
         severity: 'error',
@@ -146,7 +137,7 @@ export async function runRepairLoop(
     }
     request = assembleRepairPrompt({
       promptTemplate: options.promptTemplate,
-      originalRequest: assembleGeneratorPrompt({ promptTemplate: options.promptTemplate, materials: options.materials, upstream: options.upstream }),
+      originalRequest,
       artifact,
       issues,
     })

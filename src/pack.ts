@@ -46,6 +46,8 @@ export interface Pack {
   /** Declarative rules; language-scoped keyword rules keyed per language. */
   readonly rules: ReadonlyMap<string, readonly DeclarativeRule[]>
   readonly functionRules: readonly FunctionRule[]
+  /** sha256 of rules/functions.js source bytes; '' when the pack ships none. */
+  readonly functionsSourceHash: string
   /** Generator prompt per language; `{{materials}}`, `{{upstream}}` slots. */
   readonly prompts: ReadonlyMap<string, string>
   /** Handlebars template per language rendering the artifact to Markdown. */

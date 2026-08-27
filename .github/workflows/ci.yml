@@ -8,21 +8,27 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # hanzeep is checked out into a subdirectory so the local file: devDeps
+      # at ../deepseek-harness resolve. Remove both hacks once dsh publishes
+      # a complete npm release (see README Development note).
       - uses: actions/checkout@v4
+        with:
+          path: hanzeep
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          path: deepseek-harness
       - uses: pnpm/action-setup@v4
         with:
           version: 10.14.0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      # deepseek-harness must sit at ../deepseek-harness for the file: devDeps.
-      # Remove this checkout once dsh publishes a complete npm release.
-      - uses: actions/checkout@v4
-        with:
-          repository: deepseek-ai/deepseek-harness
-          path: deepseek-harness
       - name: build host typings
         run: cd deepseek-harness && pnpm install --frozen-lockfile && pnpm run build:lib:host
       - run: pnpm install
+        working-directory: hanzeep
       - run: npx tsc -b tsconfig.json
+        working-directory: hanzeep
       - run: pnpm test:coverage
+        working-directory: hanzeep

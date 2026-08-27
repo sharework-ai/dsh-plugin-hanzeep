@@ -31,3 +31,19 @@ export function truncateSnapshot(value: unknown, max = 80): string {
   if (text === undefined) return 'undefined'
   return text.length > max ? `${text.slice(0, max)}…` : text
 }
+
+/** Error/warning tallies shared by the loop, receipts, and tools. */
+export function severityCounts(issues: readonly Issue[]): { errors: number; warnings: number } {
+  let errors = 0
+  let warnings = 0
+  for (const i of issues) {
+    if (i.severity === 'error') errors++
+    else if (i.severity === 'warning') warnings++
+  }
+  return { errors, warnings }
+}
+
+/** AbortError test shared by the loop and the LLM port (cancellation must propagate, not become a red receipt). */
+export function isAbortError(error: unknown): boolean {
+  return (error as Error | undefined)?.name === 'AbortError'
+}

@@ -39,16 +39,14 @@ describe('coverage: rule engine branches', () => {
     expect(engine(doc).some(i => i.ruleId === 'r/max')).toBe(true)
   })
 
-  it('unsupported given path fails loud', () => {
+  it('unsupported given path fails loud at engine creation', () => {
     const rules: DeclarativeRule[] = [{ id: 'r/bad', severity: 'error', given: '$..deep', field: 'x', kind: 'minLength', min: 1, suggestion: 's' }]
-    const engine = createRuleEngine(fakePack({ rules }), 'zh-CN')
-    expect(() => engine(doc)).toThrow(/given path not supported/)
+    expect(() => createRuleEngine(fakePack({ rules }), 'zh-CN')).toThrow(/given path not supported/)
   })
 
-  it('invalid rule pattern fails loud on first run', () => {
+  it('invalid rule pattern fails loud at engine creation', () => {
     const rules: DeclarativeRule[] = [{ id: 'r/pat', severity: 'error', given: '$.functions[*]', field: 'desc', kind: 'pattern', pattern: '([unclosed', mustMatch: true, suggestion: 's' }]
-    const engine = createRuleEngine(fakePack({ rules }), 'zh-CN')
-    expect(() => engine(doc)).toThrow(/invalid pattern/)
+    expect(() => createRuleEngine(fakePack({ rules }), 'zh-CN')).toThrow(/pattern/)
   })
 
   it('crashing function rule surfaces with the rule id', () => {
@@ -130,7 +128,7 @@ describe('coverage: loader validation branches', () => {
     await writeFile(join(dir, 'manifest.json'), JSON.stringify({ name: 'p1', version: '', languages: ['zh-CN'] }), 'utf8')
     await writeFile(join(dir, 'schema.json'), '{"type":"object"}', 'utf8')
     await writeFile(join(dir, 'rules', 'zh-CN.json'), '[]', 'utf8')
-    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'p', 'utf8')
+    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'T {{materials}}', 'utf8')
     await writeFile(join(dir, 'templates', 'zh-CN.hbs'), 't', 'utf8')
     await writeFile(join(dir, 'samples', 'golden.json'), '{}', 'utf8')
     await expect(loadPacks(root, {})).rejects.toThrow(/manifest.version/)
@@ -146,7 +144,7 @@ describe('coverage: loader validation branches', () => {
     await writeFile(join(dir, 'manifest.json'), JSON.stringify({ name: 'p2', version: '1', consumes: [], languages: ['zh-CN'] }), 'utf8')
     await writeFile(join(dir, 'schema.json'), '{"type":"object"}', 'utf8')
     await writeFile(join(dir, 'rules', 'zh-CN.json'), JSON.stringify([{ id: 'r', severity: 'error', given: '$', field: 'x', kind: 'nope', suggestion: 's' }]), 'utf8')
-    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'p', 'utf8')
+    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'T {{materials}}', 'utf8')
     await writeFile(join(dir, 'templates', 'zh-CN.hbs'), 't', 'utf8')
     await writeFile(join(dir, 'samples', 'golden.json'), '{}', 'utf8')
     await expect(loadPacks(root, {})).rejects.toThrow(/kind must be one of/)
@@ -163,7 +161,7 @@ describe('coverage: loader validation branches', () => {
     await writeFile(join(dir, 'schema.json'), '{"type":"object"}', 'utf8')
     await writeFile(join(dir, 'rules', 'zh-CN.json'), '[]', 'utf8')
     await writeFile(join(dir, 'rules', 'functions.js'), 'export const rules = "nope"', 'utf8')
-    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'p', 'utf8')
+    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'T {{materials}}', 'utf8')
     await writeFile(join(dir, 'templates', 'zh-CN.hbs'), 't', 'utf8')
     await writeFile(join(dir, 'samples', 'golden.json'), '{}', 'utf8')
     await expect(loadPacks(root, {})).rejects.toThrow(/must be an array/)
@@ -178,7 +176,7 @@ async function makeMiniPack(root: string, name: string, files: Record<string, st
     'manifest.json': JSON.stringify({ name, version: '1', consumes: [], languages: ['zh-CN'] }),
     'schema.json': '{"type":"object"}',
     'rules/zh-CN.json': '[]',
-    'prompts/zh-CN.md': 'p',
+    'prompts/zh-CN.md': 'T {{materials}}',
     'templates/zh-CN.hbs': 't',
     'samples/golden.json': '{}',
   }

@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { isAbortError } from './issue.ts'
 import type { LlmRuntime, GenerateOptions } from '@deepseek-ai/dsh-llm'
 
 /**
@@ -38,7 +39,7 @@ export function createLlmPort(ctx: Context, route: LlmRoute): LlmPort {
       }
       const blocks = assembler.blocks()
       const text = blocks.filter((b): b is Extract<(typeof blocks)[number], { type: 'text' }> => b.type === 'text').map(b => b.text).join('')
-      if (text.length === 0) throw new Error('llm returned no text blocks')
+      if (text.length === 0) throw new Error(`llm route ${route.provider}/${route.model} returned no text blocks; check the provider adapter output shape or try a different model`)
       return text
     },
   }
@@ -49,7 +50,7 @@ export async function withSingleRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
   } catch (error) {
-    if (error !== undefined && (error as Error).name === 'AbortError') throw error
+    if (isAbortError(error)) throw error
     return await fn()
   }
 }

@@ -33,7 +33,16 @@
     "given": "$.functions[*]",
     "field": "l1Name",
     "kind": "forbiddenKeywords",
-    "keywords": ["管理", "处理", "系统", "manage", "process", "system"],
+    "keywords": [
+      "control",
+      "handle",
+      "manage",
+      "process",
+      "system",
+      "处理",
+      "管理",
+      "系统"
+    ],
     "suggestion": "一级功能名称不得使用“管理/处理/系统/manage/process/system”等泛化词：改用具体的业务对象+动作命名，如“添加收藏”。"
   },
   {
@@ -42,7 +51,16 @@
     "given": "$.functions[*]",
     "field": "l2Name",
     "kind": "forbiddenKeywords",
-    "keywords": ["管理", "处理", "系统", "manage", "process", "system"],
+    "keywords": [
+      "control",
+      "handle",
+      "manage",
+      "process",
+      "system",
+      "处理",
+      "管理",
+      "系统"
+    ],
     "suggestion": "二级功能名称不得使用“管理/处理/系统/manage/process/system”等泛化词：改用具体的业务对象+动作命名，如“删除收藏”。"
   },
   {
@@ -51,7 +69,16 @@
     "given": "$.functions[*]",
     "field": "l3Name",
     "kind": "forbiddenKeywords",
-    "keywords": ["管理", "处理", "系统", "manage", "process", "system"],
+    "keywords": [
+      "control",
+      "handle",
+      "manage",
+      "process",
+      "system",
+      "处理",
+      "管理",
+      "系统"
+    ],
     "suggestion": "三级功能名称不得使用“管理/处理/系统/manage/process/system”等泛化词：改用具体的业务对象+动作命名。"
   }
 ]

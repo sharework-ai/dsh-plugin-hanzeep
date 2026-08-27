@@ -33,7 +33,16 @@
     "given": "$.functions[*]",
     "field": "l1Name",
     "kind": "forbiddenKeywords",
-    "keywords": ["manage", "process", "system", "handle", "control", "管理", "处理", "系统"],
+    "keywords": [
+      "control",
+      "handle",
+      "manage",
+      "process",
+      "system",
+      "处理",
+      "管理",
+      "系统"
+    ],
     "suggestion": "Level-1 function name must not use generic words like manage/process/system/handle/control: name it as a concrete business object plus action, e.g. 'Add Favorite'."
   },
   {
@@ -42,7 +51,16 @@
     "given": "$.functions[*]",
     "field": "l2Name",
     "kind": "forbiddenKeywords",
-    "keywords": ["manage", "process", "system", "handle", "control", "管理", "处理", "系统"],
+    "keywords": [
+      "control",
+      "handle",
+      "manage",
+      "process",
+      "system",
+      "处理",
+      "管理",
+      "系统"
+    ],
     "suggestion": "Level-2 function name must not use generic words like manage/process/system/handle/control: name it as a concrete business object plus action, e.g. 'Remove Favorite'."
   },
   {
@@ -51,7 +69,16 @@
     "given": "$.functions[*]",
     "field": "l3Name",
     "kind": "forbiddenKeywords",
-    "keywords": ["manage", "process", "system", "handle", "control", "管理", "处理", "系统"],
+    "keywords": [
+      "control",
+      "handle",
+      "manage",
+      "process",
+      "system",
+      "处理",
+      "管理",
+      "系统"
+    ],
     "suggestion": "Level-3 function name must not use generic words like manage/process/system/handle/control: name it as a concrete business object plus action."
   }
 ]

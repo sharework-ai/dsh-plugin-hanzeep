@@ -11,10 +11,11 @@ dsh plugin add dsh-plugin-hanzeep   # 1. install the bundle into your profile
 dsh                                 # 2. start a session with the profile
 ```
 
-Then, in the session:
+Copy the bundled sample into your workspace, then in the session:
 
 ```
-> doc_validate(artifactPath: "<pack dir>/samples/golden.json", pack: "cosmic-plan", language: "zh-CN")
+> doc_validate(artifactPath: "sample.json", pack: "cosmic-plan")
+# sample.json = the pack's bundled golden sample copied into your workspace
 ```
 
 You get an all-green receipt in seconds — zero LLM calls. This is the deterministic first-run moment; `doc_generate` (the closed loop) is step two.
@@ -28,7 +29,7 @@ You get an all-green receipt in seconds — zero LLM calls. This is the determin
 | `pack` | string | e.g. `cosmic-plan`; unknown names list available packs |
 | `materials` | string[] | workspace-relative file paths, or inline text starting with `#!inline` |
 | `language` | string? | default: config `defaultLanguage`, else the pack's first language |
-| `upstream` | string[]? | upstream artifact JSON for chained packs (must be green) |
+| `upstream` | string[]? | upstream artifact JSON strings for chained packs (green-receipt verification is post-MVP) |
 | `artifactName` | string? | output base name (default `<pack>-<timestamp>`) |
 
 Returns `{ artifactPath, markdownPath, receipt }`. Exhausted loops throw AND keep the draft + red receipt on disk.
@@ -72,7 +73,7 @@ packs/cosmic-plan/
 
 ```sh
 pnpm install
-pnpm test            # 80 tests, coverage gate 100% lines/functions/statements
+pnpm test            # 99 tests, coverage gate 100% lines/functions/statements
 pnpm run build       # tsc + tsdown
 ```
 

@@ -15,7 +15,11 @@ export function assembleGeneratorPrompt(options: {
   const upstreamBlock = options.upstream === undefined || options.upstream.length === 0
     ? ''
     : `\n\n<upstream-artifacts>\n${options.upstream.join('\n\n')}\n</upstream-artifacts>`
-  return options.promptTemplate.replace('{{materials}}', materialsBlock).replace('{{upstream}}', upstreamBlock)
+  // Replacer functions: replacement strings interpret $&/$`/$' patterns,
+  // which would silently corrupt materials containing them.
+  return options.promptTemplate
+    .replace('{{materials}}', () => materialsBlock)
+    .replace('{{upstream}}', () => upstreamBlock)
 }
 
 export function assembleRepairPrompt(options: {
@@ -53,9 +57,10 @@ export function assembleRepairPrompt(options: {
   ].join('\n')
 }
 
-/** Rough token estimate (chars/4) used by the loop's budget pre-check. */
+/** Rough token estimate for the budget pre-check: CJK chars ≈ 1 token each, others ≈ 4 chars/token. */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
+  const cjk = (text.match(/[\u3400-\u9FFF\uF900-\uFAFF]|[\uD840-\uD87F][\uDC00-\uDFFF]/g) ?? []).length
+  return Math.ceil(cjk + (text.length - cjk) / 4)
 }
 
 /** Extract the first JSON value from a model reply, tolerating code fences. */
@@ -63,13 +68,28 @@ export function extractJson(text: string): unknown {
   const stripped = text.replace(/```(?:json)?\n?/g, '')
   const start = stripped.indexOf('{')
   if (start < 0) throw new Error(`no JSON object found in model output (length ${text.length})`)
-  for (let end = stripped.lastIndexOf('}'); end > start; end = stripped.lastIndexOf('}', end - 1)) {
-    const candidate = stripped.slice(start, end + 1)
-    try {
-      return JSON.parse(candidate)
-    } catch {
-      continue
+  // Forward scan tracking string/escape state; JSON.parse only at depth-zero
+  // closes keeps adversarial outputs O(n) instead of O(n^2).
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i]!
+    if (escaped) { escaped = false; continue }
+    if (ch === '\\') { escaped = inString; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        try {
+          return JSON.parse(stripped.slice(start, i + 1))
+        } catch {
+          throw new Error(`model output JSON object is malformed (span ${start}..${i})`)
+        }
+      }
     }
   }
-  throw new Error('model output contains no parseable JSON object')
+  throw new Error('model output contains no complete parseable JSON object (unbalanced braces)')
 }

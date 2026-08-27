@@ -68,6 +68,26 @@ export const rules = [
     },
   },
   {
+    // W101 migrated from plan_auditor.py: per-function recommended 20-50.
+    id: 'plan/func-cfps-recommended-range',
+    severity: 'warning',
+    suggestion: '调整该功能的 estimatedCfps 到建议区间 20-50（schema 硬边界 10-100）',
+    check: (artifact) => {
+      const issues = []
+      getFunctions(artifact).forEach((fn, index) => {
+        const cfps = fn?.estimatedCfps
+        if (typeof cfps === 'number' && Number.isFinite(cfps) && (cfps < 20 || cfps > 50)) {
+          issues.push({
+            jsonPath: `$.functions[${index}].estimatedCfps`,
+            message: `单功能CFP超出建议区间：${cfps}，建议 20-50`,
+            snapshot: String(cfps),
+          })
+        }
+      })
+      return issues
+    },
+  },
+  {
     // Thresholds migrated from plan_auditor.py: per-function recommended
     // 20-50 (W101), schema hard bounds 10-100; without desiredCfps the
     // total band is [20, 1000]. Also verifies totalCfps === sum.

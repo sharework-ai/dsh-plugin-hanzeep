@@ -1,9 +1,9 @@
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import type { Config } from './config.ts'
+import { mkdir, rename, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { DEFAULT_MAX_ITERATIONS, DEFAULT_PROMPT_TOKEN_BUDGET, type Config } from './config.ts'
 import type { Issue } from './issue.ts'
 import type { LlmPort } from './llm-port.ts'
-import { runRepairLoop, type LoopResult } from './loop.ts'
+import { runRepairLoop } from './loop.ts'
 import type { Pack } from './pack.ts'
 import { createRuleEngine, rollupRules } from './rule-engine.ts'
 import { readMaterials } from './materials.ts'
@@ -13,14 +13,16 @@ import { artifactHashOf, RECEIPT_FORMAT_VERSION, sha256, type Json, type Receipt
 import { createRenderer } from './render.ts'
 
 /**
- * Pack-scoped doc service shared by the two tools. One instance per
- * (pack, language) so schema/rule/render compilation happens once.
+ * Pack-scoped doc service shared by the two tools. Instances are cached per
+ * (pack, language) so ajv/rule/handlebars compilation happens once per
+ * plugin lifetime, not per tool call.
  */
 export class DocService {
   private readonly schemaCheck: (artifact: unknown) => readonly Issue[]
   private readonly ruleEngine: (artifact: unknown) => readonly Issue[]
   readonly renderer: (artifact: unknown) => string
   readonly promptTemplate: string
+  private readonly schemaHash: string
 
   constructor(
     readonly pack: Pack,
@@ -30,9 +32,10 @@ export class DocService {
       throw new Error(`pack "${pack.manifest.name}" does not support language "${language}" (supported: ${pack.manifest.languages.join(', ')})`)
     }
     this.promptTemplate = pack.prompts.get(language) ?? ''
-    this.schemaCheck = createSchemaCheck(pack.schema)
+    this.schemaCheck = createSchemaCheck(pack.schema, `pack "${pack.manifest.name}"`)
     this.ruleEngine = createRuleEngine(pack, language)
-    this.renderer = createRenderer(pack.templates.get(language) ?? '')
+    this.renderer = createRenderer(pack.templates.get(language) ?? '', `pack "${pack.manifest.name}" ${language} template`)
+    this.schemaHash = sha256(JSON.stringify(pack.schema))
   }
 
   validate(artifact: unknown): readonly Issue[] {
@@ -42,7 +45,7 @@ export class DocService {
   rulesetSnapshot(): Receipt['rulesetSnapshot'] {
     return {
       declarative: (this.pack.rules.get(this.language) ?? []) as unknown as Record<string, Json>[],
-      functionsSourceHash: sha256(JSON.stringify(this.pack.functionRules.map(r => ({ id: r.id, suggestion: r.suggestion })))),
+      functionsSourceHash: this.pack.functionsSourceHash,
     }
   }
 
@@ -50,29 +53,48 @@ export class DocService {
     return rollupRules(this.pack, this.language, issues)
   }
 
+  /**
+   * Single receipt constructor for generate and revalidate, so the two
+   * receipt flavors can never drift apart.
+   */
   buildReceipt(input: {
-    result: LoopResult
+    artifact: unknown
+    isValid: boolean
+    unresolved: readonly Issue[]
+    iterations: number
+    rounds: Receipt['rounds']
     model: string
   }): Receipt {
-    const artifact = input.result.status === 'green' ? input.result.artifact : input.result.draftArtifact
-    const isValid = input.result.status === 'green'
-    const finalIssues = isValid ? [] : (input.result as { unresolved: readonly Issue[] }).unresolved
     return {
       formatVersion: RECEIPT_FORMAT_VERSION,
       pack: this.pack.manifest.name,
       packVersion: this.pack.manifest.version,
       language: this.language,
-      artifactHash: artifactHashOf(artifact),
-      schemaHash: sha256(JSON.stringify(this.pack.schema)),
+      artifactHash: artifactHashOf(input.artifact),
+      schemaHash: this.schemaHash,
       rulesetSnapshot: this.rulesetSnapshot(),
-      iterations: input.result.iterations,
-      rounds: input.result.rounds,
-      rules: this.rollup(finalIssues),
-      isValid,
+      iterations: input.iterations,
+      rounds: input.rounds,
+      rules: this.rollup(input.isValid ? [] : input.unresolved),
+      isValid: input.isValid,
       generatedAt: new Date().toISOString(),
       model: input.model,
     }
   }
+}
+
+/** Cache key `${pack}:${language}` → compiled DocService. */
+const serviceCache = new Map<string, DocService>()
+
+/** Cached DocService accessor; compilation cost is paid once per (pack, language). */
+export function getDocService(pack: Pack, language: string): DocService {
+  const key = `${pack.manifest.name}:${language}`
+  let service = serviceCache.get(key)
+  if (service === undefined) {
+    service = new DocService(pack, language)
+    serviceCache.set(key, service)
+  }
+  return service
 }
 
 export interface GenerateInput {
@@ -94,38 +116,54 @@ export interface GenerateOutput {
   readonly receipt: Receipt
 }
 
+/** Artifact names become filesystem basenames; reject anything path-shaped. */
+export function assertSafeArtifactName(name: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) || name.includes('..')) {
+    throw new Error(`artifactName must be a plain basename of [A-Za-z0-9._-] (no path separators, no leading dot); got ${JSON.stringify(name)}`)
+  }
+}
+
+/** Write via tmp+rename so a crash never leaves a half-written file. */
+async function writeAtomic(path: string, content: string): Promise<void> {
+  await writeFile(`${path}.tmp`, content, 'utf8')
+  await rename(`${path}.tmp`, path)
+}
+
 /**
  * doc_generate core: token pre-check → closed loop → persist artifact,
  * markdown, and sidecar receipt. Exhausted loops still write the draft and
  * a red receipt (fail loud, nothing silent).
  */
 export async function generateDocument(input: GenerateInput): Promise<GenerateOutput> {
-  const service = new DocService(input.pack, input.language)
+  assertSafeArtifactName(input.artifactName)
+  const service = getDocService(input.pack, input.language)
   const materialTexts = await readMaterials(input.materials, input.workspaceRoot)
   const firstPrompt = assembleGeneratorPrompt({ promptTemplate: service.promptTemplate, materials: materialTexts, upstream: input.upstream })
   const budget = estimateTokens(firstPrompt)
-  const tokenBudget = input.config.promptTokenBudget ?? 60_000
+  const tokenBudget = input.config.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
   if (budget > tokenBudget) {
     throw new Error(`generator prompt exceeds token budget (${budget} > ${tokenBudget}); reduce materials or raise promptTokenBudget`)
   }
+  const model = input.config.model ?? 'unknown'
   const result = await runRepairLoop(
     {
       llm: input.llm,
       promptTemplate: service.promptTemplate,
       materials: materialTexts,
       upstream: input.upstream,
-      maxIterations: input.config.maxIterations ?? 5,
+      maxIterations: input.config.maxIterations ?? DEFAULT_MAX_ITERATIONS,
       promptTokenBudget: tokenBudget,
-      model: input.config.model ?? 'unknown',
+      model,
       signal: input.signal,
       validate: artifact => service.validate(artifact),
     },
     (event, artifact) => input.onRound(event.round, artifact),
   )
 
-  const model = input.config.model ?? 'unknown'
-  const receipt = service.buildReceipt({ result, model })
-  const artifact = result.status === 'green' ? result.artifact : result.draftArtifact
+  const isValid = result.status === 'green'
+  const artifact = isValid ? result.artifact : result.draftArtifact
+  const unresolved = isValid ? [] : result.unresolved
+  const receipt = service.buildReceipt({ artifact, isValid, unresolved, iterations: result.iterations, rounds: result.rounds, model })
 
   const outDir = resolve(input.workspaceRoot, 'output')
   await mkdir(outDir, { recursive: true })
@@ -134,14 +172,12 @@ export async function generateDocument(input: GenerateInput): Promise<GenerateOu
   const markdownPath = join(outDir, `${input.artifactName}.md`)
   // Draft-first persistence: the artifact lands on disk before the receipt so
   // any crash between writes leaves a readable draft, never an orphan receipt.
-  await writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
-  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8')
-  const markdown = service.renderer(artifact)
-  await writeFile(markdownPath, markdown, 'utf8')
-  void dirname(receiptPath)
+  await writeAtomic(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`)
+  await writeAtomic(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`)
+  await writeAtomic(markdownPath, service.renderer(artifact))
 
-  if (result.status === 'exhausted') {
-    throw new Error(`doc_generate exhausted after ${result.iterations} iterations without going green; draft + red receipt kept at ${artifactPath}. Unresolved: ${result.unresolved.slice(0, 5).map(i => i.ruleId).join(', ')}${result.unresolved.length > 5 ? '…' : ''}`)
+  if (!isValid) {
+    throw new Error(`doc_generate exhausted after ${result.iterations} iterations without going green; draft + red receipt kept at ${artifactPath}. Unresolved: ${unresolved.slice(0, 5).map(i => i.ruleId).join(', ')}${unresolved.length > 5 ? '…' : ''}`)
   }
   return { artifactPath, markdownPath, receipt }
 }

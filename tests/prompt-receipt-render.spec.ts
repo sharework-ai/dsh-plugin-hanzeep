@@ -53,7 +53,7 @@ describe('extractJson', () => {
     expect(() => extractJson('no json')).toThrow(/no JSON object/)
   })
   it('throws when nothing parses', () => {
-    expect(() => extractJson('{broken}')).toThrow(/no parseable JSON/)
+    expect(() => extractJson('{broken}')).toThrow(/malformed|no parseable/)
   })
 })
 

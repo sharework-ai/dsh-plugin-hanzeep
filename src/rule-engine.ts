@@ -1,5 +1,11 @@
 import type { DeclarativeRule, FunctionRule, Pack } from './pack.ts'
 import type { Issue } from './issue.ts'
+import type { ReceiptRuleResult } from './receipt.ts'
+
+export const SCHEMA_RULE_FAMILY = 'schema/*'
+
+/** Compiled view of a declarative rule; regex is validated once at engine creation. */
+interface CompiledRule { readonly rule: DeclarativeRule; readonly scope: 'root' | { readonly key: string }; readonly re?: RegExp }
 import { truncateSnapshot } from './issue.ts'
 
 /**
@@ -9,27 +15,34 @@ import { truncateSnapshot } from './issue.ts'
  * ~100 lines). Runs declarative rules then function rules over the artifact.
  */
 
-function scopeFor(artifact: unknown, given: string): { items: readonly unknown[]; parent: unknown } {
-  // `given` forms: `$.functions[*]` (array of objects) or `$` (whole doc).
-  const arrayMatch = /^\$\.([A-Za-z0-9_]+)\[\*\]$/.exec(given)
+function compileRule(rule: DeclarativeRule): CompiledRule {
+  if (rule.given === '$') return { rule, scope: 'root' }
+  const arrayMatch = /^\$\.([A-Za-z0-9_]+)\[\*\]$/.exec(rule.given)
   if (arrayMatch === null) {
-    if (given !== '$') throw new Error(`rule given path not supported: ${given} (supported: $, $.field[*])`)
-    return { items: [artifact], parent: artifact }
+    throw new Error(`rule ${rule.id}: given path not supported: ${rule.given} (supported: $, $.field[*])`)
   }
-  const key = arrayMatch[1] ?? ''
-  const value = (artifact as Record<string, unknown> | null)?.[key]
-  if (!Array.isArray(value)) {
-    // Empty path is schema's business; an absent array simply yields no items.
-    return { items: [], parent: artifact }
+  if (rule.kind === 'pattern') {
+    try {
+      return { rule, scope: { key: arrayMatch[1] ?? '' }, re: new RegExp(rule.pattern) }
+    } catch (error) {
+      throw new Error(`rule ${rule.id}: invalid pattern "${rule.pattern}": ${(error as Error).message}`)
+    }
   }
-  return { items: value, parent: value }
+  return { rule, scope: { key: arrayMatch[1] ?? '' } }
 }
 
-function checkField(rule: DeclarativeRule, item: unknown, index: number): Issue | undefined {
+function scopeFor(artifact: unknown, compiled: CompiledRule): readonly unknown[] {
+  if (compiled.scope === 'root') return [artifact]
+  const value = (artifact as Record<string, unknown> | null)?.[compiled.scope.key]
+  // Empty path is schema's business; an absent array simply yields no items.
+  return Array.isArray(value) ? value : []
+}
+
+function checkField(compiled: CompiledRule, item: unknown, index: number): Issue | undefined {
+  const rule = compiled.rule
   const obj = item as Record<string, unknown> | null
   const value = obj?.[rule.field]
-  const jsonPath = `$.${rule.given === '$' ? '' : `${rule.given.slice(2)}.`}${rule.field}`.replace('..', '.')
-  const at = rule.given === '$' ? jsonPath : `${rule.given.slice(0, -3)}[${index}].${rule.field}`
+  const at = rule.given === '$' ? `$.${rule.field}` : `${rule.given.slice(0, -3)}[${index}].${rule.field}`
   const snapshot = truncateSnapshot(value)
   switch (rule.kind) {
     case 'minLength': {
@@ -47,13 +60,7 @@ function checkField(rule: DeclarativeRule, item: unknown, index: number): Issue 
     }
     case 'pattern': {
       const text = typeof value === 'string' ? value : ''
-      let re: RegExp
-      try {
-        re = new RegExp(rule.pattern)
-      } catch (error) {
-        throw new Error(`rule ${rule.id}: invalid pattern "${rule.pattern}": ${(error as Error).message}`)
-      }
-      const matches = re.test(text)
+      const matches = compiled.re!.test(text)
       return matches === rule.mustMatch ? undefined : { ruleId: rule.id, severity: rule.severity, jsonPath: at, message: `pattern "${rule.pattern}" ${rule.mustMatch ? 'not matched' : 'matched (forbidden)'}`, ...(snapshot === undefined ? {} : { snapshot }), suggestion: rule.suggestion }
     }
   }
@@ -64,17 +71,16 @@ export function createRuleEngine(pack: Pack, language: string): (artifact: unkno
   if (declarative === undefined) {
     throw new Error(`pack ${pack.manifest.name} has no rules for language "${language}"`)
   }
-  const fnRules: readonly FunctionRule[] = pack.functionRules
+  const compiledRules = declarative.map(compileRule)
   return (artifact: unknown): readonly Issue[] => {
     const issues: Issue[] = []
-    for (const rule of declarative) {
-      const { items } = scopeFor(artifact, rule.given)
-      items.forEach((item, index) => {
-        const issue = checkField(rule, item, index)
+    for (const compiled of compiledRules) {
+      for (const [index, item] of scopeFor(artifact, compiled).entries()) {
+        const issue = checkField(compiled, item, index)
         if (issue !== undefined) issues.push(issue)
-      })
+      }
     }
-    for (const rule of fnRules) {
+    for (const rule of pack.functionRules) {
       try {
         for (const found of rule.check(artifact)) {
           issues.push({ ruleId: rule.id, severity: rule.severity, jsonPath: found.jsonPath, message: found.message, ...(found.snapshot === undefined ? {} : { snapshot: found.snapshot }), suggestion: rule.suggestion })
@@ -87,19 +93,34 @@ export function createRuleEngine(pack: Pack, language: string): (artifact: unkno
   }
 }
 
-/** Issue set → per-rule pass/fail rollup for receipts. */
-export function rollupRules(pack: Pack, language: string, issues: readonly Issue[]): { ruleId: string; severity: string; status: 'pass' | 'fail'; count: number }[] {
+/**
+ * Issue set → per-rule rollup for receipts. Schema violations roll up under
+ * the `schema/*` family; loop-internal issues (`internal/*`) appear as
+ * themselves; rules that never failed list as pass.
+ */
+export function rollupRules(pack: Pack, language: string, issues: readonly Issue[]): ReceiptRuleResult[] {
   const failed = new Map<string, number>()
-  for (const i of issues) failed.set(i.ruleId, (failed.get(i.ruleId) ?? 0) + 1)
+  let schemaFailures = 0
+  for (const i of issues) {
+    if (i.ruleId.startsWith('schema/')) schemaFailures++
+    else failed.set(i.ruleId, (failed.get(i.ruleId) ?? 0) + 1)
+  }
+  const severityOf = new Map<string, string>([
+    ...(pack.rules.get(language) ?? []).map(r => [r.id, r.severity] as const),
+    ...pack.functionRules.map(r => [r.id, r.severity] as const),
+  ])
   const ids = new Set<string>([
     ...(pack.rules.get(language) ?? []).map(r => r.id),
     ...pack.functionRules.map(r => r.id),
-    'schema/*',
+    SCHEMA_RULE_FAMILY,
+    ...failed.keys(),
   ])
   return [...ids].sort().map(ruleId => ({
     ruleId,
-    severity: ruleId === 'schema/*' ? 'error' : 'error',
-    status: failed.has(ruleId) ? ('fail' as const) : ('pass' as const),
-    count: failed.get(ruleId) ?? 0,
+    severity: ruleId === SCHEMA_RULE_FAMILY ? 'error' : severityOf.get(ruleId) ?? 'error',
+    status: ruleId === SCHEMA_RULE_FAMILY
+      ? (schemaFailures > 0 ? ('fail' as const) : ('pass' as const))
+      : failed.has(ruleId) ? ('fail' as const) : ('pass' as const),
+    count: ruleId === SCHEMA_RULE_FAMILY ? schemaFailures : failed.get(ruleId) ?? 0,
   }))
 }

@@ -1,22 +1,36 @@
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Config } from './config.ts'
-import { generateDocument, DocService } from './doc-service.ts'
+import { generateDocument, getDocService } from './doc-service.ts'
 import { createLlmPort } from './llm-port.ts'
 import type { Pack } from './pack.ts'
 import { artifactHashOf, type Receipt } from './receipt.ts'
+import { severityCounts } from './issue.ts'
 
 /**
  * Model-facing tools. `doc_generate` walks the closed loop; `doc_validate`
- * re-runs the embedded ruleset snapshot against the stored artifact and
- * verifies its hash — tamper-evident replay of the all-green state.
+ * re-runs the pack ruleset over a stored artifact and compares its canonical
+ * hash with the sidecar receipt — tamper-evident replay of the all-green
+ * state. `hashMatches: null` means no sidecar receipt exists (e.g. the
+ * bundled golden sample).
  */
 
 export interface ToolDeps {
   readonly packs: ReadonlyMap<string, Pack>
   readonly config: Config
   readonly ctx: object & { llm?: unknown }
+}
+
+/** Resolve and lexically confine a user-supplied path to the workspace root. */
+function confinePath(workspaceRoot: string, ref: string, what: string): string {
+  const root = resolve(workspaceRoot)
+  const abs = resolve(root, ref)
+  const rel = relative(root, abs)
+  if (rel === '..' || rel.startsWith('../')) {
+    throw new Error(`${what} path escapes the workspace root: ${ref} (root: ${root})`)
+  }
+  return abs
 }
 
 function resolvePack(deps: ToolDeps, name: string): Pack {
@@ -28,16 +42,16 @@ function resolvePack(deps: ToolDeps, name: string): Pack {
 }
 
 function resolveLanguage(deps: ToolDeps, pack: Pack, language?: string): string {
-  const chosen = language ?? deps.config.defaultLanguage ?? pack.manifest.languages[0] ?? ''
-  if (chosen.length === 0) throw new Error('no language available: set the tool language or config defaultLanguage')
-  if (!pack.manifest.languages.includes(chosen)) {
-    throw new Error(`pack "${name(pack)}" does not support language "${chosen}" (supported: ${pack.manifest.languages.join(', ')})`)
+  const configured = deps.config.defaultLanguage
+  const chosen = language !== undefined && language.length > 0
+    ? language
+    : configured !== undefined && configured.length > 0 ? configured : ''
+  const final = chosen.length > 0 ? chosen : pack.manifest.languages[0] ?? ''
+  if (final.length === 0) throw new Error('no language available: set the tool language or config defaultLanguage')
+  if (!pack.manifest.languages.includes(final)) {
+    throw new Error(`pack "${pack.manifest.name}" does not support language "${final}" (supported: ${pack.manifest.languages.join(', ')})`)
   }
-  return chosen
-}
-
-function name(pack: Pack): string {
-  return pack.manifest.name
+  return final
 }
 
 function requireRoute(deps: ToolDeps): { provider: string; model: string } {
@@ -57,7 +71,8 @@ export type GenerateToolResult = {
 export type ValidateToolResult = {
   readonly artifactPath: string
   readonly receipt: Receipt
-  readonly hashMatches: boolean
+  /** true: hash matches sidecar; false: artifact changed after generation; null: no sidecar receipt. */
+  readonly hashMatches: boolean | null
 }
 
 export function defineDocGenerateTool(deps: ToolDeps) {
@@ -68,10 +83,10 @@ export function defineDocGenerateTool(deps: ToolDeps) {
       + 'Materials are workspace-relative file paths or inline text starting with "#!inline".',
     parameters: {
       pack: { type: 'string', required: true, description: 'Pack name (e.g. cosmic-plan)' },
-      materials: { type: 'array', required: true, description: 'Material references: workspace file paths or #!inline text' },
+      materials: { type: 'array', required: true, items: { type: 'string' }, description: 'Material references: workspace file paths or #!inline text' },
       language: { type: 'string', description: 'Output language (default: config defaultLanguage)' },
-      upstream: { type: 'array', description: 'Upstream artifact JSON strings for chained packs (must have valid green receipts)' },
-      artifactName: { type: 'string', description: 'Output base name (default: <pack>-<timestamp>)' },
+      upstream: { type: 'array', items: { type: 'string' }, description: 'Upstream artifact JSON strings for chained packs (post-MVP: green-receipt verification)' },
+      artifactName: { type: 'string', description: 'Output base name, plain [A-Za-z0-9._-] basename (default: <pack>-<timestamp>)' },
     },
     output: {
       schema: { type: 'json' },
@@ -83,16 +98,22 @@ export function defineDocGenerateTool(deps: ToolDeps) {
       const materials = args.materials as string[]
       const upstream = args.upstream as string[] | undefined
       if (pack.manifest.consumes.length > 0) {
-        if (args.upstream === undefined || args.upstream.length === 0) {
-          throw new Error(`pack "${name(pack)}" consumes upstream artifacts [${pack.manifest.consumes.join(', ')}]; pass them via the upstream parameter`)
+        if (upstream === undefined || upstream.length === 0) {
+          throw new Error(`pack "${pack.manifest.name}" consumes upstream artifacts [${pack.manifest.consumes.join(', ')}]; pass them via the upstream parameter`)
         }
-        verifyUpstream(deps, pack, upstream)
+        for (const raw of upstream) {
+          try {
+            void JSON.parse(raw)
+          } catch {
+            throw new Error(`upstream artifact is not valid JSON (first 60 chars: ${raw.slice(0, 60)}…)`)
+          }
+        }
       }
       const route = requireRoute(deps)
       const llm = createLlmPort(deps.ctx as never, route)
       const artifactName = args.artifactName ?? `${pack.manifest.name}-${Date.now()}`
       const workspaceRoot = deps.config.workspaceRoot ?? process.cwd()
-      return await generateDocument({
+      const result = await generateDocument({
         pack,
         language,
         materials,
@@ -102,44 +123,24 @@ export function defineDocGenerateTool(deps: ToolDeps) {
         config: deps.config,
         llm,
         signal: exec.signal,
-        onRound: (round, artifact) => {
-          try {
-            void round; void artifact
-          } catch { /* round sink is receipt-only in MVP */ }
-        },
-      }) as unknown as GenerateToolResult
+        // Round data lives in the receipt returned with the tool result;
+        // dedicated session events are tracked in TODOS.md.
+        onRound: () => {},
+      })
+      return result as unknown as GenerateToolResult
     },
   })
-}
-
-/**
- * Chained-pack integrity: every upstream artifact must carry a green receipt
- * whose artifactHash matches its content (Eng finding: red drafts must never
- * feed downstream packs).
- */
-function verifyUpstream(deps: ToolDeps, pack: Pack, upstream: readonly string[] | undefined): void {
-  void deps
-  for (const raw of upstream ?? []) {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
-      throw new Error(`upstream artifact is not valid JSON (first 60 chars: ${raw.slice(0, 60)}…)`)
-    }
-    void parsed
-    void pack
-  }
 }
 
 export function defineDocValidateTool(deps: ToolDeps) {
   return defineTool({
     name: 'doc_validate',
-    description: 'Re-validate an existing document artifact against its pack ruleset and verify its receipt hash. '
-      + 'Deterministic, no LLM. Returns a fresh receipt; hashMatches=false means the artifact changed after generation.',
+    description: 'Re-validate an existing document artifact against its pack ruleset and compare its hash with the sidecar receipt. '
+      + 'Deterministic, no LLM. Returns a fresh receipt; hashMatches=false means the artifact changed after generation; hashMatches=null means no prior receipt exists.',
     parameters: {
-      artifactPath: { type: 'string', required: true, description: 'Path to the artifact JSON (workspace-relative or absolute)' },
+      artifactPath: { type: 'string', required: true, description: 'Workspace-relative path to the artifact JSON' },
       pack: { type: 'string', required: true, description: 'Pack name the artifact belongs to' },
-      language: { type: 'string', description: 'Language whose ruleset to run (default: config defaultLanguage)' },
+      language: { type: 'string', description: 'Language whose ruleset to run; defaults to the receipt-recorded language, then config defaultLanguage' },
     },
     output: {
       schema: { type: 'json' },
@@ -147,35 +148,51 @@ export function defineDocValidateTool(deps: ToolDeps) {
     },
     async execute(args: { artifactPath: string; pack: string; language?: string }) {
       const pack = resolvePack(deps, args.pack)
-      const language = resolveLanguage(deps, pack, args.language)
       const workspaceRoot = deps.config.workspaceRoot ?? process.cwd()
-      const artifactPath = resolve(workspaceRoot, args.artifactPath)
+      const artifactPath = confinePath(workspaceRoot, args.artifactPath, 'artifactPath')
       const raw = await readFile(artifactPath, 'utf8')
       let artifact: unknown
       try {
         artifact = JSON.parse(raw)
       } catch (error) {
-        throw new Error(`artifact is not valid JSON: ${(error as Error).message}`)
+        throw new Error(`artifact ${args.artifactPath} is not valid JSON: ${(error as Error).message}; regenerate via doc_generate or fix the file`)
       }
-      const service = new DocService(pack, language)
+
+      // Tamper evidence: compare the canonical hash against the sidecar
+      // receipt written at generation time (absent for bundled samples).
+      let storedReceipt: { artifactHash?: string; language?: string } | undefined
+      let hashMatches: boolean | null = null
+      try {
+        const parsed: unknown = JSON.parse(await readFile(`${artifactPath.replace(/\.json$/, '')}.receipt.json`, 'utf8'))
+        storedReceipt = typeof parsed === 'object' && parsed !== null ? parsed as { artifactHash?: string; language?: string } : undefined
+        hashMatches = storedReceipt?.artifactHash === artifactHashOf(artifact)
+      } catch {
+        storedReceipt = undefined
+      }
+
+      // Language: explicit param (must match the recorded one) > receipt-recorded > config default > pack first.
+      const recorded = storedReceipt?.language
+      if (args.language !== undefined && args.language.length > 0 && recorded !== undefined && args.language !== recorded) {
+        throw new Error(`language "${args.language}" does not match the receipt-recorded language "${recorded}"; omit the parameter to revalidate as recorded`)
+      }
+      const language = args.language !== undefined && args.language.length > 0
+        ? args.language
+        : recorded !== undefined && recorded.length > 0 ? recorded! : undefined
+      const resolvedLang = resolveLanguage(deps, pack, language)
+
+      const service = getDocService(pack, resolvedLang)
       const issues = service.validate(artifact)
-      const isValid = issues.every(i => i.severity !== 'error')
-      const receipt: Receipt = {
-        formatVersion: 1,
-        pack: pack.manifest.name,
-        packVersion: pack.manifest.version,
-        language,
-        artifactHash: artifactHashOf(artifact),
-        schemaHash: service.rulesetSnapshot().functionsSourceHash,
-        rulesetSnapshot: service.rulesetSnapshot(),
-        iterations: 0,
-        rounds: [{ round: 0, errorCount: issues.filter(i => i.severity === 'error').length, warningCount: issues.filter(i => i.severity === 'warning').length }],
-        rules: service.rollup(issues),
+      const counts = severityCounts(issues)
+      const isValid = counts.errors === 0
+      const receipt = service.buildReceipt({
+        artifact,
         isValid,
-        generatedAt: new Date().toISOString(),
+        unresolved: issues,
+        iterations: 0,
+        rounds: [{ round: 0, errorCount: counts.errors, warningCount: counts.warnings }],
         model: 'revalidate',
-      }
-      return { artifactPath, receipt, hashMatches: true } as unknown as ValidateToolResult
+      })
+      return { artifactPath, receipt, hashMatches } as unknown as ValidateToolResult
     },
   })
 }

@@ -4,7 +4,13 @@
   "description": "Simplified COSMIC plan-phase artifact schema migrated from cosmic-claude assets/schemas/plan.json",
   "type": "object",
   "additionalProperties": true,
-  "required": ["functions"],
+  "required": [
+    "functions",
+    "docType",
+    "reqNo",
+    "reqTitle",
+    "language"
+  ],
   "properties": {
     "totalCfps": {
       "type": "number",
@@ -17,12 +23,21 @@
       "items": {
         "type": "object",
         "additionalProperties": true,
-        "required": ["funcId", "l1Name", "funcDesc", "estimatedCfps"],
+        "required": [
+          "funcId",
+          "l1Name",
+          "funcDesc",
+          "estimatedCfps"
+        ],
         "properties": {
           "funcId": {
             "type": "string",
             "description": "Function ID: segments separated by hyphens, each segment 1-8 chars (A-Z, 0-9), at least 2 segments",
-            "examples": ["A-A-01", "USR-MGT-01", "API-GW-01"]
+            "examples": [
+              "A-A-01",
+              "USR-MGT-01",
+              "API-GW-01"
+            ]
           },
           "l1Name": {
             "type": "string",

@@ -1,5 +1,9 @@
 import z from '@deepseek-ai/schemastery'
 
+/** Single source of truth for tunable defaults (config.ts, not call sites). */
+export const DEFAULT_MAX_ITERATIONS = 5
+export const DEFAULT_PROMPT_TOKEN_BUDGET = 60_000
+
 /** Plugin configuration, overridable from cordis.yml (no hardcoded tunables). */
 export interface Config {
   /** Extra pack directories merged over the built-in packs/ (same-name wins). */
@@ -21,8 +25,8 @@ export const Config: z<Config> = z.object({
   packsDir: z.string(),
   workspaceRoot: z.string(),
   defaultLanguage: z.string(),
-  maxIterations: z.number().default(5),
-  promptTokenBudget: z.number().default(60_000),
+  maxIterations: z.number().default(DEFAULT_MAX_ITERATIONS),
+  promptTokenBudget: z.number().default(DEFAULT_PROMPT_TOKEN_BUDGET),
   provider: z.string(),
   model: z.string(),
 })
