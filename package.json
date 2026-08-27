@@ -5,14 +5,14 @@
   "type": "module",
   "license": "MIT",
   "main": "lib/index.js",
-  "types": "lib/types/index.d.ts",
+  "types": "lib/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/types/index.d.ts",
+      "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
     "./pack": {
-      "types": "./lib/types/pack.d.ts",
+      "types": "./lib/pack.d.ts",
       "default": "./lib/pack.js"
     },
     "./src/*": "./src/*",
