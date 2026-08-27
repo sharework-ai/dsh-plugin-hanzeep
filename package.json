@@ -20,7 +20,8 @@
   },
   "files": [
     "lib",
-    "packs"
+    "packs",
+    "cordis.patch.yml"
   ],
   "keywords": [
     "dsh-plugin",
