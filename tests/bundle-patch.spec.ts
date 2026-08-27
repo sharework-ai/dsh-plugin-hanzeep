@@ -20,6 +20,19 @@ describe('package distribution shape', () => {
     expect(patch).toBe('./cordis.patch.yml')
     expect(manifest.files ?? []).toContain('cordis.patch.yml')
   })
+
+  it('declared type entry points match the flat lib/ declaration layout', async () => {
+    // Regression: ISSUE-003 — types/exports pointed at lib/types/*.d.ts while
+    // tsc (outDir lib, rootDir src) emits declarations beside the JS at the
+    // lib/ root, so every types consumer resolved a dangling path.
+    const manifest = JSON.parse(await readFile(`${repoRoot}/package.json`, 'utf8')) as {
+      types?: string
+      exports?: Record<string, { types?: string }>
+    }
+    expect(manifest.types).toBe('lib/index.d.ts')
+    expect(manifest.exports?.['.']?.types).toBe('./lib/index.d.ts')
+    expect(manifest.exports?.['./pack']?.types).toBe('./lib/pack.d.ts')
+  })
 })
 
 // Regression: ISSUE-001 — bundle patch rows must import the real package name.
