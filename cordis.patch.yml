@@ -1,0 +1,13 @@
+# dsh bundle layer: inserts hanzeep into a profile's plugin composition.
+# The config block maps 1:1 to src/config.ts (all fields optional; see README).
+- insert:
+    - id: hanzeep
+      name: hanzeep
+      config:
+        packsDir: ""
+        workspaceRoot: ""
+        defaultLanguage: ""
+        maxIterations: 5
+        promptTokenBudget: 60000
+        provider: ""
+        model: ""

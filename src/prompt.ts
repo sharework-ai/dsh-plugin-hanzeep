@@ -1,0 +1,75 @@
+import type { Issue } from './issue.ts'
+
+/**
+ * Generator and repair prompt assembly. Repair prompts embed the current
+ * artifact plus issues grouped by jsonPath; oversized artifacts fail loud in
+ * the loop's budget pre-check before any model call is spent.
+ */
+
+export function assembleGeneratorPrompt(options: {
+  promptTemplate: string
+  materials: readonly string[]
+  upstream?: readonly string[] | undefined
+}): string {
+  const materialsBlock = options.materials.map(m => `<material>\n${m}\n</material>`).join('\n\n')
+  const upstreamBlock = options.upstream === undefined || options.upstream.length === 0
+    ? ''
+    : `\n\n<upstream-artifacts>\n${options.upstream.join('\n\n')}\n</upstream-artifacts>`
+  return options.promptTemplate.replace('{{materials}}', materialsBlock).replace('{{upstream}}', upstreamBlock)
+}
+
+export function assembleRepairPrompt(options: {
+  promptTemplate: string
+  originalRequest: string
+  artifact: unknown
+  issues: readonly Issue[]
+}): string {
+  const grouped = new Map<string, Issue[]>()
+  for (const issue of options.issues) {
+    const list = grouped.get(issue.jsonPath) ?? []
+    list.push(issue)
+    grouped.set(issue.jsonPath, list)
+  }
+  const issueLines = [...grouped.entries()].map(([path, list]) => {
+    const items = list.map(i => `    - [${i.severity}] ${i.ruleId}: ${i.message}${i.suggestion === undefined ? '' : `\n      fix: ${i.suggestion}`}`).join('\n')
+    return `  ${path}:\n${items}`
+  }).join('\n')
+  return [
+    options.promptTemplate,
+    '',
+    '<previous-attempt>',
+    options.originalRequest,
+    '</previous-attempt>',
+    '',
+    '<current-artifact>',
+    JSON.stringify(options.artifact, null, 2),
+    '</current-artifact>',
+    '',
+    '<validation-issues>',
+    issueLines,
+    '</validation-issues>',
+    '',
+    'Fix ONLY the listed issues. Return the complete corrected JSON document and nothing else. Do not change parts not listed above.',
+  ].join('\n')
+}
+
+/** Rough token estimate (chars/4) used by the loop's budget pre-check. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+/** Extract the first JSON value from a model reply, tolerating code fences. */
+export function extractJson(text: string): unknown {
+  const stripped = text.replace(/```(?:json)?\n?/g, '')
+  const start = stripped.indexOf('{')
+  if (start < 0) throw new Error(`no JSON object found in model output (length ${text.length})`)
+  for (let end = stripped.lastIndexOf('}'); end > start; end = stripped.lastIndexOf('}', end - 1)) {
+    const candidate = stripped.slice(start, end + 1)
+    try {
+      return JSON.parse(candidate)
+    } catch {
+      continue
+    }
+  }
+  throw new Error('model output contains no parseable JSON object')
+}

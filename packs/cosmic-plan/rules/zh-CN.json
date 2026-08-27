@@ -1,0 +1,57 @@
+[
+  {
+    "id": "plan/func-desc-min-length",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "funcDesc",
+    "kind": "minLength",
+    "min": 80,
+    "suggestion": "功能描述不足80字：补充触发条件、数据校验、处理步骤、输出结果与异常处理等细节，使描述完整可审。"
+  },
+  {
+    "id": "plan/func-desc-max-length",
+    "severity": "warning",
+    "given": "$.functions[*]",
+    "field": "funcDesc",
+    "kind": "maxLength",
+    "max": 2000,
+    "suggestion": "功能描述超过2000字：拆分功能或精简描述，只保留估算 CFP 所需的处理过程信息。"
+  },
+  {
+    "id": "plan/func-id-format",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "funcId",
+    "kind": "pattern",
+    "pattern": "^[A-Z0-9]{1,8}(-[A-Z0-9]{1,8})+$",
+    "mustMatch": true,
+    "suggestion": "funcId 格式不合法：使用大写字母/数字分段、段间以连字符分隔、至少两段，每段1-8个字符，如 USR-FAV-01。"
+  },
+  {
+    "id": "plan/l1-name-forbidden-keywords",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "l1Name",
+    "kind": "forbiddenKeywords",
+    "keywords": ["管理", "处理", "系统", "manage", "process", "system"],
+    "suggestion": "一级功能名称不得使用“管理/处理/系统/manage/process/system”等泛化词：改用具体的业务对象+动作命名，如“添加收藏”。"
+  },
+  {
+    "id": "plan/l2-name-forbidden-keywords",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "l2Name",
+    "kind": "forbiddenKeywords",
+    "keywords": ["管理", "处理", "系统", "manage", "process", "system"],
+    "suggestion": "二级功能名称不得使用“管理/处理/系统/manage/process/system”等泛化词：改用具体的业务对象+动作命名，如“删除收藏”。"
+  },
+  {
+    "id": "plan/l3-name-forbidden-keywords",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "l3Name",
+    "kind": "forbiddenKeywords",
+    "keywords": ["管理", "处理", "系统", "manage", "process", "system"],
+    "suggestion": "三级功能名称不得使用“管理/处理/系统/manage/process/system”等泛化词：改用具体的业务对象+动作命名。"
+  }
+]

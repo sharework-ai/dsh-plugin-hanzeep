@@ -1,0 +1,76 @@
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+import { fileURLToPath } from 'node:url'
+import { loadPacks } from '../src/pack-loader.ts'
+import { DocService } from '../src/doc-service.ts'
+
+const packsRoot = fileURLToPath(new URL('../packs', import.meta.url))
+
+async function loadCosmic() {
+  const packs = await loadPacks(packsRoot, {})
+  const pack = packs.get('cosmic-plan')
+  if (pack === undefined) throw new Error('cosmic-plan not loaded')
+  return pack
+}
+
+describe('pack loader', () => {
+  it('loads the builtin cosmic-plan pack with both languages', async () => {
+    const pack = await loadCosmic()
+    expect(pack.manifest.version).toBe('0.1.0')
+    expect(pack.manifest.consumes).toEqual([])
+    for (const lang of ['zh-CN', 'en-US']) {
+      expect(pack.prompts.get(lang)).toContain('{{materials}}')
+      expect(pack.templates.get(lang)).toBeTruthy()
+      expect((pack.rules.get(lang) ?? []).length).toBeGreaterThan(0)
+    }
+    expect(pack.functionRules.length).toBe(3)
+  })
+
+  it('golden sample passes all-green in both languages', async () => {
+    const pack = await loadCosmic()
+    for (const lang of pack.manifest.languages) {
+      const service = new DocService(pack, lang)
+      const errors = service.validate(pack.goldenSample).filter(i => i.severity === 'error')
+      expect(errors, `${lang}: ${JSON.stringify(errors)}`).toEqual([])
+    }
+  })
+
+  it('fails loud on a broken manifest', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hanzeep-bad-root-'))
+    const dir = join(root, 'bad-pack')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'manifest.json'), '{"name": ""}', 'utf8')
+    await expect(loadPacks(packsRoot, { extra: [root] })).rejects.toThrow(/manifest.name/)
+  })
+
+  it('fails loud when a rules file is not an array', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hanzeep-root-'))
+    const dir = join(root, 'broken-pack')
+    await mkdir(join(dir, 'rules'), { recursive: true })
+    await mkdir(join(dir, 'prompts'), { recursive: true })
+    await mkdir(join(dir, 'templates'), { recursive: true })
+    await mkdir(join(dir, 'samples'), { recursive: true })
+    await writeFile(join(dir, 'manifest.json'), JSON.stringify({ name: 'broken', version: '1', languages: ['zh-CN'], consumes: [] }), 'utf8')
+    await writeFile(join(dir, 'schema.json'), '{"type":"object"}', 'utf8')
+    await writeFile(join(dir, 'rules', 'zh-CN.json'), '{"not":"array"}', 'utf8')
+    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'p', 'utf8')
+    await writeFile(join(dir, 'templates', 'zh-CN.hbs'), 't', 'utf8')
+    await writeFile(join(dir, 'samples', 'golden.json'), '{}', 'utf8')
+    await expect(loadPacks(root, { builtin: [] })).rejects.toThrow(/must be an array/)
+  })
+
+  it('extra dirs override same-name builtin packs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hanzeep-override-'))
+    const dir = join(root, 'cosmic-plan')
+    const src = join(packsRoot, 'cosmic-plan')
+    const { cp } = await import('node:fs/promises')
+    await cp(src, dir, { recursive: true })
+    const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(dir, 'manifest.json'), 'utf8'))
+    manifest.version = '9.9.9'
+    await writeFile(join(dir, 'manifest.json'), JSON.stringify(manifest), 'utf8')
+    const packs = await loadPacks(packsRoot, { extra: [root] })
+    expect(packs.get('cosmic-plan')?.manifest.version).toBe('9.9.9')
+  })
+})

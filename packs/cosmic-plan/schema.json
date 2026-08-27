@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "COSMIC Plan Document",
+  "description": "Simplified COSMIC plan-phase artifact schema migrated from cosmic-claude assets/schemas/plan.json",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["functions"],
+  "properties": {
+    "totalCfps": {
+      "type": "number",
+      "description": "Sum of all estimatedCfps; must equal the sum of functions[].estimatedCfps"
+    },
+    "functions": {
+      "type": "array",
+      "description": "List of planned leaf functions",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["funcId", "l1Name", "funcDesc", "estimatedCfps"],
+        "properties": {
+          "funcId": {
+            "type": "string",
+            "description": "Function ID: segments separated by hyphens, each segment 1-8 chars (A-Z, 0-9), at least 2 segments",
+            "examples": ["A-A-01", "USR-MGT-01", "API-GW-01"]
+          },
+          "l1Name": {
+            "type": "string",
+            "description": "Level 1 function name"
+          },
+          "l2Name": {
+            "type": "string",
+            "description": "Level 2 function name (optional)"
+          },
+          "l3Name": {
+            "type": "string",
+            "description": "Level 3 function name (optional)"
+          },
+          "funcDesc": {
+            "type": "string",
+            "description": "Function description; content-quality minimum length (80) is enforced by rule plan/func-desc-min-length"
+          },
+          "estimatedCfps": {
+            "type": "number",
+            "description": "Estimated CFP count for this function (hard bounds 10-100, recommended 20-50)",
+            "minimum": 10,
+            "maximum": 100
+          }
+        }
+      }
+    }
+  }
+}

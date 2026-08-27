@@ -1,0 +1,57 @@
+[
+  {
+    "id": "plan/func-desc-min-length",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "funcDesc",
+    "kind": "minLength",
+    "min": 80,
+    "suggestion": "Function description is shorter than 80 characters: add trigger conditions, validation logic, processing steps, outputs, and error handling."
+  },
+  {
+    "id": "plan/func-desc-max-length",
+    "severity": "warning",
+    "given": "$.functions[*]",
+    "field": "funcDesc",
+    "kind": "maxLength",
+    "max": 2000,
+    "suggestion": "Function description exceeds 2000 characters: split the function or trim the description to the process information needed for CFP estimation."
+  },
+  {
+    "id": "plan/func-id-format",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "funcId",
+    "kind": "pattern",
+    "pattern": "^[A-Z0-9]{1,8}(-[A-Z0-9]{1,8})+$",
+    "mustMatch": true,
+    "suggestion": "Invalid funcId format: use uppercase alphanumeric segments joined by hyphens, at least two segments, 1-8 characters each, e.g. USR-FAV-01."
+  },
+  {
+    "id": "plan/l1-name-forbidden-keywords",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "l1Name",
+    "kind": "forbiddenKeywords",
+    "keywords": ["manage", "process", "system", "handle", "control", "管理", "处理", "系统"],
+    "suggestion": "Level-1 function name must not use generic words like manage/process/system/handle/control: name it as a concrete business object plus action, e.g. 'Add Favorite'."
+  },
+  {
+    "id": "plan/l2-name-forbidden-keywords",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "l2Name",
+    "kind": "forbiddenKeywords",
+    "keywords": ["manage", "process", "system", "handle", "control", "管理", "处理", "系统"],
+    "suggestion": "Level-2 function name must not use generic words like manage/process/system/handle/control: name it as a concrete business object plus action, e.g. 'Remove Favorite'."
+  },
+  {
+    "id": "plan/l3-name-forbidden-keywords",
+    "severity": "error",
+    "given": "$.functions[*]",
+    "field": "l3Name",
+    "kind": "forbiddenKeywords",
+    "keywords": ["manage", "process", "system", "handle", "control", "管理", "处理", "系统"],
+    "suggestion": "Level-3 function name must not use generic words like manage/process/system/handle/control: name it as a concrete business object plus action."
+  }
+]

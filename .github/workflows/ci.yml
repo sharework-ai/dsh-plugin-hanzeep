@@ -1,0 +1,28 @@
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # deepseek-harness must sit at ../deepseek-harness for the file: devDeps.
+      # Remove this checkout once dsh publishes a complete npm release.
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          path: deepseek-harness
+      - name: build host typings
+        run: cd deepseek-harness && pnpm install --frozen-lockfile && pnpm run build:lib:host
+      - run: pnpm install
+      - run: npx tsc -b tsconfig.json
+      - run: pnpm test:coverage
