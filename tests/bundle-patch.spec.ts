@@ -4,6 +4,24 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 
+// Regression: ISSUE-002 — the npm tarball must ship the bundle patch file.
+// `files` omitted cordis.patch.yml, so a registry install left the manifest
+// declaring dsh.bundle.patch while the file was absent — every profile boot
+// then failed loud with "failed to read overlay ... ENOENT". A link: install
+// hides this (the whole repo is visible), which is why only a tarball install
+// reproduces it. Found by /qa on 2026-08-27.
+describe('package distribution shape', () => {
+  it('files ships the bundle patch declared by dsh.bundle.patch', async () => {
+    const manifest = JSON.parse(await readFile(`${repoRoot}/package.json`, 'utf8')) as {
+      files?: string[]
+      dsh?: { bundle?: { patch?: string } }
+    }
+    const patch = manifest.dsh?.bundle?.patch
+    expect(patch).toBe('./cordis.patch.yml')
+    expect(manifest.files ?? []).toContain('cordis.patch.yml')
+  })
+})
+
 // Regression: ISSUE-001 — bundle patch rows must import the real package name.
 // A cordis entry's `name` is the loader's import specifier, not a display
 // label: `name: hanzeep` booted the real dsh host to
