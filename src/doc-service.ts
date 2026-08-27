@@ -9,7 +9,7 @@ import { createRuleEngine, rollupRules } from './rule-engine.ts'
 import { readMaterials } from './materials.ts'
 import { assembleGeneratorPrompt, estimateTokens } from './prompt.ts'
 import { createSchemaCheck } from './schema-check.ts'
-import { artifactHashOf, RECEIPT_FORMAT_VERSION, sha256, type Json, type Receipt } from './receipt.ts'
+import { artifactHashOf, RECEIPT_FORMAT_VERSION, sha256, type Json, type Receipt, type UpstreamAnchor } from './receipt.ts'
 import { createRenderer } from './render.ts'
 
 /**
@@ -64,6 +64,7 @@ export class DocService {
     iterations: number
     rounds: Receipt['rounds']
     model: string
+    upstream?: readonly UpstreamAnchor[] | undefined
   }): Receipt {
     return {
       formatVersion: RECEIPT_FORMAT_VERSION,
@@ -73,6 +74,7 @@ export class DocService {
       artifactHash: artifactHashOf(input.artifact),
       schemaHash: this.schemaHash,
       rulesetSnapshot: this.rulesetSnapshot(),
+      upstreamHashes: [...(input.upstream ?? [])],
       iterations: input.iterations,
       rounds: input.rounds,
       rules: this.rollup(input.isValid ? [] : input.unresolved),
@@ -101,7 +103,10 @@ export interface GenerateInput {
   readonly pack: Pack
   readonly language: string
   readonly materials: readonly string[]
+  /** Upstream artifact JSON texts, receipt-verified by the tool layer. */
   readonly upstream?: readonly string[] | undefined
+  /** Chain anchors recorded into the receipt (pack/version/hash per upstream). */
+  readonly upstreamAnchors?: readonly UpstreamAnchor[] | undefined
   readonly artifactName: string
   readonly workspaceRoot: string
   readonly config: Config
@@ -163,7 +168,7 @@ export async function generateDocument(input: GenerateInput): Promise<GenerateOu
   const isValid = result.status === 'green'
   const artifact = isValid ? result.artifact : result.draftArtifact
   const unresolved = isValid ? [] : result.unresolved
-  const receipt = service.buildReceipt({ artifact, isValid, unresolved, iterations: result.iterations, rounds: result.rounds, model })
+  const receipt = service.buildReceipt({ artifact, isValid, unresolved, iterations: result.iterations, rounds: result.rounds, model, upstream: input.upstreamAnchors })
 
   const outDir = resolve(input.workspaceRoot, 'output')
   await mkdir(outDir, { recursive: true })

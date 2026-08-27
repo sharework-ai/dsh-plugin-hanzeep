@@ -113,7 +113,9 @@ describe('coverage: consuming-pack upstream checks', () => {
     const tool = defineDocGenerateTool(deps)
     const signal = new AbortController().signal
     await expect(tool.execute({ pack: 'chain-pack', materials: ['#!inline\nx'] } as never, { signal } as never)).rejects.toThrow(/consumes upstream/)
-    await expect(tool.execute({ pack: 'chain-pack', materials: ['#!inline\nx'], upstream: ['not-json'] } as never, { signal } as never)).rejects.toThrow(/not valid JSON/)
+    // No sidecar receipt for a bare JSON file
+    await writeFile(join(root, 'bare.json'), '{}', 'utf8')
+    await expect(tool.execute({ pack: 'chain-pack', materials: ['#!inline\nx'], upstream: ['bare.json'] } as never, { signal } as never)).rejects.toThrow(/no sidecar receipt/)
   })
 })
 

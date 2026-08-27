@@ -5,7 +5,7 @@ import type { Config } from './config.ts'
 import { generateDocument, getDocService } from './doc-service.ts'
 import { createLlmPort } from './llm-port.ts'
 import type { Pack } from './pack.ts'
-import { artifactHashOf, type Receipt } from './receipt.ts'
+import { artifactHashOf, type Receipt, type UpstreamAnchor } from './receipt.ts'
 import { severityCounts } from './issue.ts'
 
 /**
@@ -85,7 +85,7 @@ export function defineDocGenerateTool(deps: ToolDeps) {
       pack: { type: 'string', required: true, description: 'Pack name (e.g. cosmic-plan)' },
       materials: { type: 'array', required: true, items: { type: 'string' }, description: 'Material references: workspace file paths or #!inline text' },
       language: { type: 'string', description: 'Output language (default: config defaultLanguage)' },
-      upstream: { type: 'array', items: { type: 'string' }, description: 'Upstream artifact JSON strings for chained packs (post-MVP: green-receipt verification)' },
+      upstream: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths to upstream artifacts for chained packs; each must carry a green sidecar receipt (hash-verified)' },
       artifactName: { type: 'string', description: 'Output base name, plain [A-Za-z0-9._-] basename (default: <pack>-<timestamp>)' },
     },
     output: {
@@ -97,17 +97,16 @@ export function defineDocGenerateTool(deps: ToolDeps) {
       const language = resolveLanguage(deps, pack, args.language)
       const materials = args.materials as string[]
       const upstream = args.upstream as string[] | undefined
+      let upstreamTexts: string[] | undefined
+      let upstreamAnchors: UpstreamAnchor[] | undefined
       if (pack.manifest.consumes.length > 0) {
         if (upstream === undefined || upstream.length === 0) {
-          throw new Error(`pack "${pack.manifest.name}" consumes upstream artifacts [${pack.manifest.consumes.join(', ')}]; pass them via the upstream parameter`)
+          throw new Error(`pack "${pack.manifest.name}" consumes upstream artifacts [${pack.manifest.consumes.join(', ')}]; pass their workspace paths via the upstream parameter`)
         }
-        for (const raw of upstream) {
-          try {
-            void JSON.parse(raw)
-          } catch {
-            throw new Error(`upstream artifact is not valid JSON (first 60 chars: ${raw.slice(0, 60)}…)`)
-          }
-        }
+        const workspaceRoot0 = deps.config.workspaceRoot ?? process.cwd()
+        const verified = await verifyUpstreamReceipts(workspaceRoot0, upstream, pack)
+        upstreamTexts = verified.texts
+        upstreamAnchors = verified.anchors
       }
       const route = requireRoute(deps)
       const llm = createLlmPort(deps.ctx as never, route)
@@ -117,7 +116,8 @@ export function defineDocGenerateTool(deps: ToolDeps) {
         pack,
         language,
         materials,
-        upstream,
+        upstream: upstreamTexts,
+        upstreamAnchors,
         artifactName,
         workspaceRoot,
         config: deps.config,
@@ -195,4 +195,57 @@ export function defineDocValidateTool(deps: ToolDeps) {
       return { artifactPath, receipt, hashMatches } as unknown as ValidateToolResult
     },
   })
+}
+
+/**
+ * Chain integrity: each upstream reference is a workspace path whose artifact
+ * must carry a GREEN sidecar receipt with a matching canonical hash and a
+ * pack type the consumer declares in `consumes`. Red drafts, tampered
+ * artifacts, and wrong-type documents never feed downstream packs.
+ */
+export async function verifyUpstreamReceipts(
+  workspaceRoot: string,
+  upstreamPaths: readonly string[],
+  pack: Pack,
+): Promise<{ texts: string[]; anchors: UpstreamAnchor[] }> {
+  const texts: string[] = []
+  const anchors: UpstreamAnchor[] = []
+  for (const ref of upstreamPaths) {
+    const artifactPath = confinePath(workspaceRoot, ref, 'upstream')
+    const receiptPath = `${artifactPath.replace(/\.json$/, '')}.receipt.json`
+    let raw: string
+    let stored: { pack?: string; packVersion?: string; artifactHash?: string; isValid?: boolean } | undefined
+    try {
+      raw = await readFile(artifactPath, 'utf8')
+    } catch (error) {
+      throw new Error(`upstream artifact not readable: ${ref} (${(error as Error).message})`)
+    }
+    try {
+      const parsed: unknown = JSON.parse(await readFile(receiptPath, 'utf8'))
+      stored = typeof parsed === 'object' && parsed !== null ? parsed as typeof stored : undefined
+    } catch {
+      stored = undefined
+    }
+    if (stored === undefined) {
+      throw new Error(`upstream artifact ${ref} has no sidecar receipt; generate it with doc_generate first (cause: chain integrity requires a green receipt; fix: run doc_generate on the upstream pack)`)
+    }
+    if (stored.isValid !== true) {
+      throw new Error(`upstream artifact ${ref} has a RED receipt; red drafts must never feed downstream packs (fix: repair or regenerate the upstream document until green)`)
+    }
+    let artifact: unknown
+    try {
+      artifact = JSON.parse(raw)
+    } catch {
+      throw new Error(`upstream artifact ${ref} is not valid JSON`)
+    }
+    if (stored.artifactHash !== artifactHashOf(artifact)) {
+      throw new Error(`upstream artifact ${ref} was modified after generation (hash mismatch vs receipt); regenerate it before consuming`)
+    }
+    if (stored.pack === undefined || !pack.manifest.consumes.includes(stored.pack)) {
+      throw new Error(`upstream artifact ${ref} is of pack "${stored.pack ?? 'unknown'}" but "${pack.manifest.name}" consumes [${pack.manifest.consumes.join(', ')}]`)
+    }
+    texts.push(JSON.stringify(artifact))
+    anchors.push({ pack: stored.pack, packVersion: stored.packVersion ?? 'unknown', artifactHash: stored.artifactHash ?? '' })
+  }
+  return { texts, anchors }
 }

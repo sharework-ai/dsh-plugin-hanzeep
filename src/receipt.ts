@@ -25,6 +25,13 @@ export type ReceiptRuleResult = {
   readonly count: number
 }
 
+/** Chain anchor: which upstream artifact this document was built from. */
+export type UpstreamAnchor = {
+  readonly pack: string
+  readonly packVersion: string
+  readonly artifactHash: string
+}
+
 export type Receipt = {
   readonly formatVersion: number
   readonly pack: string
@@ -34,6 +41,8 @@ export type Receipt = {
   readonly schemaHash: string
   /** Declarative rules JSON as-run; function rules contribute their source hash. */
   readonly rulesetSnapshot: { readonly declarative: Record<string, Json>[]; readonly functionsSourceHash: string }
+  /** Chain anchors for consumed upstream artifacts ([] for root packs and revalidation). */
+  readonly upstreamHashes: UpstreamAnchor[]
   readonly iterations: number
   readonly rounds: ReceiptRound[]
   readonly rules: ReceiptRuleResult[]

@@ -29,7 +29,7 @@ You get an all-green receipt in seconds — zero LLM calls. This is the determin
 | `pack` | string | e.g. `cosmic-plan`; unknown names list available packs |
 | `materials` | string[] | workspace-relative file paths, or inline text starting with `#!inline` |
 | `language` | string? | default: config `defaultLanguage`, else the pack's first language |
-| `upstream` | string[]? | upstream artifact JSON strings for chained packs (green-receipt verification is post-MVP) |
+| `upstream` | string[]? | workspace-relative paths to upstream artifacts; each must carry a green sidecar receipt (hash-verified, pack type matched against `consumes`) |
 | `artifactName` | string? | output base name (default `<pack>-<timestamp>`) |
 
 Returns `{ artifactPath, markdownPath, receipt }`. Exhausted loops throw AND keep the draft + red receipt on disk.
@@ -73,7 +73,7 @@ packs/cosmic-plan/
 
 ```sh
 pnpm install
-pnpm test            # 99 tests, coverage gate 100% lines/functions/statements
+pnpm test            # 110 tests, coverage gate 100% lines/functions/statements
 pnpm run build       # tsc + tsdown
 ```
 
@@ -83,4 +83,4 @@ pnpm run build       # tsc + tsdown
 
 - Receipts are tamper-evident, not tamper-proof (no signature): accidental edits go red; a determined attacker can forge both artifact and receipt.
 - Repair-loop observability lives in the receipt (per-round issue counts); dedicated session events are future work.
-- Materials are trusted input: malicious material content can steer generation (documented trust model).
+- Materials are trusted input: malicious material content can steer generation (documented trust model; accepted at review, nonce delimiters deferred).

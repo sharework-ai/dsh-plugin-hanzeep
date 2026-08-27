@@ -12,6 +12,7 @@ import { assertSafeArtifactName } from '../src/doc-service.ts'
 import type { LlmPort } from '../src/llm-port.ts'
 import type { Issue } from '../src/issue.ts'
 import { rollupRules } from '../src/rule-engine.ts'
+import { artifactHashOf } from '../src/receipt.ts'
 
 const packsRoot = fileURLToPath(new URL('../packs', import.meta.url))
 const signal = new AbortController().signal
@@ -297,5 +298,87 @@ describe('review fix: minLength/maxLength/forbiddenKeywords payload validation',
     await writeFile(join(dir, 'templates', 'zh-CN.hbs'), 't', 'utf8')
     await writeFile(join(dir, 'samples', 'golden.json'), '{}', 'utf8')
     await expect(loadPacks(root, {})).rejects.toThrow(pattern)
+  })
+})
+
+describe('review fix: green-receipt upstream verification + receipt anchoring', () => {
+  async function makeChainDeps() {
+    const packs = await loadPacks(packsRoot, {})
+    const pack = packs.get('cosmic-plan')!
+    const root = await mkdtemp(join(tmpdir(), 'hanzeep-chain3-'))
+    // Build a consuming pack
+    const dir = join(root, 'packs', 'chain3')
+    for (const sub of ['rules', 'prompts', 'templates', 'samples']) await mkdir(join(dir, sub), { recursive: true })
+    await writeFile(join(dir, 'manifest.json'), JSON.stringify({ name: 'chain3', version: '1', consumes: ['cosmic-plan'], languages: ['zh-CN'] }), 'utf8')
+    await writeFile(join(dir, 'schema.json'), '{"type":"object"}', 'utf8')
+    await writeFile(join(dir, 'rules', 'zh-CN.json'), '[]', 'utf8')
+    await writeFile(join(dir, 'prompts', 'zh-CN.md'), 'T {{materials}} {{upstream}}', 'utf8')
+    await writeFile(join(dir, 'templates', 'zh-CN.hbs'), 'ok {{json}}', 'utf8')
+    await writeFile(join(dir, 'samples', 'golden.json'), '{}', 'utf8')
+    const all = await loadPacks(packsRoot, { extra: [join(root, 'packs')] })
+    const golden = all.get('cosmic-plan')!.goldenSample
+    const deps = {
+      packs: all,
+      config: { provider: 'p', model: 'm', workspaceRoot: root, maxIterations: 1, promptTokenBudget: 60_000 } as never,
+      ctx: {
+        llm: {
+          async *stream() {
+            const text = JSON.stringify(golden)
+            yield { type: 'block-start', index: 0, blockType: 'text' }
+            yield { type: 'text-delta', index: 0, text }
+            yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+            yield { type: 'finish', reason: 'stop' }
+          },
+        },
+      },
+    }
+    return { deps, root, pack }
+  }
+
+  it('accepts a green upstream and anchors its hash in the receipt', async () => {
+    const { deps, root } = await makeChainDeps()
+    // Green upstream: generate via cosmic-plan
+    const gen = defineDocGenerateTool(deps)
+    await gen.execute({ pack: 'cosmic-plan', materials: ['#!inline\nx'], language: 'zh-CN', artifactName: 'up1' } as never, { signal } as never)
+    const out = await gen.execute({ pack: 'chain3', materials: ['#!inline\nx'], upstream: ['output/up1.json'], artifactName: 'down1' } as never, { signal } as never) as { receipt: { upstreamHashes: Array<{ pack: string }> } }
+    expect(out.receipt.upstreamHashes).toHaveLength(1)
+    expect(out.receipt.upstreamHashes[0]!.pack).toBe('cosmic-plan')
+    void root
+  })
+
+  it('rejects a tampered (hash-mismatch) upstream', async () => {
+    const { deps, root } = await makeChainDeps()
+    const gen = defineDocGenerateTool(deps)
+    await gen.execute({ pack: 'cosmic-plan', materials: ['#!inline\nx'], language: 'zh-CN', artifactName: 'up2' } as never, { signal } as never)
+    const { readFile, writeFile } = await import('node:fs/promises')
+    const p2 = join(root, 'output', 'up2.json')
+    const art = JSON.parse(await readFile(p2, 'utf8'))
+    art.functions[0].funcDesc += ' tampered'
+    await writeFile(p2, JSON.stringify(art), 'utf8')
+    await expect(gen.execute({ pack: 'chain3', materials: ['#!inline\nx'], upstream: ['output/up2.json'], artifactName: 'down2' } as never, { signal } as never)).rejects.toThrow(/modified after generation/)
+  })
+
+  it('rejects an upstream whose artifact is not valid JSON', async () => {
+    const { deps, root } = await makeChainDeps()
+    const gen = defineDocGenerateTool(deps)
+    await writeFile(join(root, 'bad.json'), 'not json', 'utf8')
+    await writeFile(join(root, 'bad.receipt.json'), JSON.stringify({ pack: 'cosmic-plan', packVersion: '0.1.0', artifactHash: 'x', isValid: true }), 'utf8')
+    await expect(gen.execute({ pack: 'chain3', materials: ['#!inline\nx'], upstream: ['bad.json'], artifactName: 'd5' } as never, { signal } as never)).rejects.toThrow(/not valid JSON/)
+    void root
+  })
+
+  it('rejects a red-receipt upstream and a wrong-type upstream', async () => {
+    const { deps, root } = await makeChainDeps()
+    const gen = defineDocGenerateTool(deps)
+    // Hand-craft a red sidecar next to a bare artifact
+    await writeFile(join(root, 'red.json'), JSON.stringify({ functions: [] }), 'utf8')
+    await writeFile(join(root, 'red.receipt.json'), JSON.stringify({ pack: 'cosmic-plan', packVersion: '0.1.0', artifactHash: 'x', isValid: false }), 'utf8')
+    await expect(gen.execute({ pack: 'chain3', materials: ['#!inline\nx'], upstream: ['red.json'], artifactName: 'd3' } as never, { signal } as never)).rejects.toThrow(/RED receipt/)
+    // Green but wrong pack type
+    const wrongArtifact = { ok: true }
+    await writeFile(join(root, 'wrong.json'), JSON.stringify(wrongArtifact), 'utf8')
+    await writeFile(join(root, 'wrong.receipt.json'), JSON.stringify({ pack: 'some-other-pack', packVersion: '1', artifactHash: artifactHashOf(wrongArtifact), isValid: true }), 'utf8')
+    await expect(gen.execute({ pack: 'chain3', materials: ['#!inline\nx'], upstream: ['wrong.json'], artifactName: 'd4' } as never, { signal } as never)).rejects.toThrow(/consumes/)
+    void root
   })
 })
