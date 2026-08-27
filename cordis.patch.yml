@@ -3,7 +3,7 @@
 # (empty strings are NOT nullish and would break the language fallback).
 - insert:
     - id: hanzeep
-      name: hanzeep
+      name: dsh-plugin-hanzeep
       config:
         maxIterations: 5
         promptTokenBudget: 60000
