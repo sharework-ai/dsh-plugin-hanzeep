@@ -1,0 +1,20 @@
+{
+  "date": "2026-08-28",
+  "url": "local:~/projects/hanzeep (dsh plugin, no web UI)",
+  "healthScore": 98,
+  "issues": [
+    { "id": "ISSUE-001", "title": "bundle patch row name not the importable package name", "severity": "critical", "category": "functional", "fixStatus": "verified", "commit": "be8be77" },
+    { "id": "ISSUE-002", "title": "npm tarball did not ship cordis.patch.yml", "severity": "critical", "category": "functional", "fixStatus": "verified", "commit": "ffcfab5" },
+    { "id": "ISSUE-003", "title": "types/exports pointed at nonexistent lib/types/", "severity": "medium", "category": "functional", "fixStatus": "verified", "commit": "70a1241" }
+  ],
+  "categoryScores": {
+    "console": 100,
+    "links": 100,
+    "visual": 100,
+    "functional": 96,
+    "ux": 100,
+    "performance": 100,
+    "content": 100,
+    "accessibility": 100
+  },
+  "notes": "CLI/plugin adaptation: browser categories are not applicable and held at 100; functional held at 96 for the deferred concurrent same-name generation limitation. Suite 114/114; coverage gate 100/87.69/100/100; npm-tarball -> real dsh host smoke 10/10."
