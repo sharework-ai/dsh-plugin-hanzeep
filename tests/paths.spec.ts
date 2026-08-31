@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { effectiveWorkspaceRoot, resolveRootWithin } from '../src/paths.ts'
+import { effectiveWorkspaceRoot, normalizeWindowsPath, resolveRootWithin } from '../src/paths.ts'
 import { defineDocGenerateTool } from '../src/tools.ts'
 import { loadPacks } from '../src/pack-loader.ts'
 import { fileURLToPath } from 'node:url'
@@ -26,8 +26,20 @@ describe('effectiveWorkspaceRoot', () => {
   })
 })
 
-describe('resolveRootWithin', () => {
-  it('defaults materialsRoot to references/ and outputRoot to output/', () => {
+describe('normalizeWindowsPath (WSL ergonomics)', () => {
+  it('maps drive-letter paths to their WSL mounts', () => {
+    expect(normalizeWindowsPath('D:\\projects\\lab\\需求 说明.md')).toBe('/mnt/d/projects/lab/需求 说明.md')
+    expect(normalizeWindowsPath('d:/x/y.md')).toBe('/mnt/d/x/y.md')
+  })
+
+  it('passes POSIX paths and plain filenames through unchanged', () => {
+    expect(normalizeWindowsPath('/mnt/d/x.md')).toBe('/mnt/d/x.md')
+    expect(normalizeWindowsPath('req.md')).toBe('req.md')
+    expect(normalizeWindowsPath('D:nope.md')).toBe('D:nope.md')
+  })
+})
+
+describe('resolveRootWithin', () => {  it('defaults materialsRoot to references/ and outputRoot to output/', () => {
     expect(resolveRootWithin('/tmp/ws', undefined, 'materialsRoot')).toBe('/tmp/ws/references')
     expect(resolveRootWithin('/tmp/ws', undefined, 'outputRoot')).toBe('/tmp/ws/output')
   })

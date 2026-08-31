@@ -5,7 +5,7 @@ import type { Config } from './config.ts'
 import { generateDocument, getDocService } from './doc-service.ts'
 import { createLlmPort } from './llm-port.ts'
 import type { Pack } from './pack.ts'
-import { effectiveWorkspaceRoot, resolveRootWithin, type SessionWorkspaceCarrier } from './paths.ts'
+import { effectiveWorkspaceRoot, normalizeWindowsPath, resolveRootWithin, type SessionWorkspaceCarrier } from './paths.ts'
 import { artifactHashOf, type Receipt, type UpstreamAnchor } from './receipt.ts'
 import { severityCounts } from './issue.ts'
 
@@ -26,7 +26,7 @@ export interface ToolDeps {
 /** Resolve and lexically confine a user-supplied path to the workspace root. */
 function confinePath(workspaceRoot: string, ref: string, what: string): string {
   const root = resolve(workspaceRoot)
-  const abs = resolve(root, ref)
+  const abs = resolve(root, normalizeWindowsPath(ref))
   const rel = relative(root, abs)
   if (rel === '..' || rel.startsWith('../')) {
     throw new Error(`${what} path escapes the workspace root: ${ref} (root: ${root})`)

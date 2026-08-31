@@ -1,5 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
+import { normalizeWindowsPath } from './paths.ts'
 
 /**
  * Material references: paths relative to the materials root (default
@@ -29,7 +30,7 @@ export async function readMaterials(
       out.push(ref.slice('#!inline'.length).replace(/^\n/, ''))
       continue
     }
-    const abs = resolve(materialBase, ref)
+    const abs = resolve(materialBase, normalizeWindowsPath(ref))
     const lexicalRel = relative(root, abs)
     if (lexicalRel === '..' || lexicalRel.startsWith('../') || isAbsolute(lexicalRel)) {
       throw new Error(`material path escapes the workspace root: ${ref} (root: ${root})`)
@@ -38,7 +39,7 @@ export async function readMaterials(
     try {
       real = await realpath(abs)
     } catch (error) {
-      throw new Error(`material not readable: ${ref} (${(error as Error).message})`)
+      throw new Error(`material not readable: ${ref} (resolved: ${abs}; materials root: ${materialBase}; cause: ${(error as Error).message})`)
     }
     const realRel = relative(root, real)
     if (realRel === '..' || realRel.startsWith('../') || isAbsolute(realRel)) {

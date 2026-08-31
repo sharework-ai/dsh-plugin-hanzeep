@@ -1,6 +1,19 @@
 import { relative, resolve } from 'node:path'
 import { DEFAULT_MATERIALS_ROOT, DEFAULT_OUTPUT_ROOT } from './config.ts'
 
+/**
+ * Normalize a Windows drive-letter path (`D:\x\y` or `D:/x/y`) to its WSL
+ * mount (`/mnt/d/x/y`), because a Linux-side tool otherwise treats the whole
+ * backslash string as one filename. Only applied on Linux (a Windows host
+ * resolves drive paths natively); everything else passes through unchanged.
+ */
+export function normalizeWindowsPath(ref: string): string {
+  if (process.platform !== 'linux') return ref
+  const match = /^([A-Za-z]):[\\/](.*)$/.exec(ref)
+  if (match === null) return ref
+  return `/mnt/${match[1]!.toLowerCase()}/${match[2]!.replace(/\\/g, '/')}`
+}
+
 /** Minimal execution-context shape hanzeep reads; avoids importing dsh types. */
 export interface SessionWorkspaceCarrier {
   readonly agent?: { readonly session?: { readonly cwd?: string } } | undefined
@@ -17,8 +30,8 @@ export function effectiveWorkspaceRoot(
   configRoot: string | undefined,
 ): string {
   const sessionCwd = exec?.agent?.session?.cwd
-  if (typeof sessionCwd === 'string' && sessionCwd.length > 0) return resolve(sessionCwd)
-  return resolve(configRoot ?? process.cwd())
+  if (typeof sessionCwd === 'string' && sessionCwd.length > 0) return resolve(normalizeWindowsPath(sessionCwd))
+  return resolve(configRoot !== undefined && configRoot.length > 0 ? normalizeWindowsPath(configRoot) : process.cwd())
 }
 
 /**
