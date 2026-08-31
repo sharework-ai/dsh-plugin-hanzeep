@@ -48,9 +48,11 @@ Re-runs the ruleset over an existing artifact — deterministic, no LLM. Returns
     defaultLanguage: "zh-CN"
     maxIterations: 5        # repair-loop round cap
     promptTokenBudget: 60000
-    provider: "deepseek"    # LLM route for doc_generate (required)
+    provider: "deepseek-official"  # an LLM route registered in the host (required)
     model: "deepseek-chat"
 ```
+
+**Provider route names**: `provider` must name a route registered in the host's LLM composition. The bundled `dsh-llm-deepseek` adapter registers as `deepseek-official` (not `deepseek`); `dsh-llm-pi-ai` registers one route per configured provider profile. An unknown route surfaces as an empty stream (`NO_ADAPTER`), not a loud error — if `doc_generate` reports an llm-error on round 1, check the adapter's registered route name first.
 
 ## Packs
 
@@ -73,7 +75,7 @@ packs/cosmic-plan/
 
 ```sh
 pnpm install
-pnpm test            # 110 tests, coverage gate 100% lines/functions/statements
+pnpm test            # 114 tests, coverage gate 100% lines/functions/statements
 pnpm run build       # tsc + tsdown
 ```
 
