@@ -1,5 +1,5 @@
 import { mkdir, rename, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_PROMPT_TOKEN_BUDGET, type Config } from './config.ts'
 import type { Issue } from './issue.ts'
 import type { LlmPort } from './llm-port.ts'
@@ -103,12 +103,16 @@ export interface GenerateInput {
   readonly pack: Pack
   readonly language: string
   readonly materials: readonly string[]
+  /** Absolute root material references resolve against (from the tool layer). */
+  readonly materialsRoot: string
   /** Upstream artifact JSON texts, receipt-verified by the tool layer. */
   readonly upstream?: readonly string[] | undefined
   /** Chain anchors recorded into the receipt (pack/version/hash per upstream). */
   readonly upstreamAnchors?: readonly UpstreamAnchor[] | undefined
   readonly artifactName: string
   readonly workspaceRoot: string
+  /** Absolute root artifacts/receipts/markdown are written to (tool layer). */
+  readonly outputRoot: string
   readonly config: Config
   readonly llm: LlmPort
   readonly signal?: AbortSignal | undefined
@@ -142,7 +146,7 @@ async function writeAtomic(path: string, content: string): Promise<void> {
 export async function generateDocument(input: GenerateInput): Promise<GenerateOutput> {
   assertSafeArtifactName(input.artifactName)
   const service = getDocService(input.pack, input.language)
-  const materialTexts = await readMaterials(input.materials, input.workspaceRoot)
+  const materialTexts = await readMaterials(input.materials, input.workspaceRoot, input.materialsRoot)
   const firstPrompt = assembleGeneratorPrompt({ promptTemplate: service.promptTemplate, materials: materialTexts, upstream: input.upstream })
   const budget = estimateTokens(firstPrompt)
   const tokenBudget = input.config.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
@@ -170,7 +174,7 @@ export async function generateDocument(input: GenerateInput): Promise<GenerateOu
   const unresolved = isValid ? [] : result.unresolved
   const receipt = service.buildReceipt({ artifact, isValid, unresolved, iterations: result.iterations, rounds: result.rounds, model, upstream: input.upstreamAnchors })
 
-  const outDir = resolve(input.workspaceRoot, 'output')
+  const outDir = input.outputRoot
   await mkdir(outDir, { recursive: true })
   const artifactPath = join(outDir, `${input.artifactName}.json`)
   const receiptPath = join(outDir, `${input.artifactName}.receipt.json`)

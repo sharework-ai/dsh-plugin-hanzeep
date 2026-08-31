@@ -2,9 +2,10 @@ import { readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 
 /**
- * Material references: workspace-relative file paths, or inline text whose
- * first line is the explicit `#!inline` marker (no heuristics). Containment
- * is enforced twice: lexically first (so `../..` gets a clear traversal
+ * Material references: paths relative to the materials root (default
+ * `<workspace>/references/`), or inline text whose first line is the explicit
+ * `#!inline` marker (no heuristics). Containment is enforced twice against
+ * the WORKSPACE root: lexically first (so `../..` gets a clear traversal
  * error even for nonexistent paths), then on REAL paths (so a symlink inside
  * the workspace that points outside it is rejected too). Both keep secrets
  * out of prompts.
@@ -12,11 +13,13 @@ import { isAbsolute, relative, resolve } from 'node:path'
 export async function readMaterials(
   refs: readonly string[],
   workspaceRoot: string,
+  materialsRoot: string,
 ): Promise<readonly string[]> {
   if (refs.length === 0) {
     throw new Error('materials must not be empty: provide at least one material reference (a workspace file path or #!inline text)')
   }
   const root = await realpath(resolve(workspaceRoot))
+  const materialBase = resolve(root, materialsRoot)
   const out: string[] = []
   for (const ref of refs) {
     if (typeof ref !== 'string') {
@@ -26,7 +29,7 @@ export async function readMaterials(
       out.push(ref.slice('#!inline'.length).replace(/^\n/, ''))
       continue
     }
-    const abs = resolve(root, ref)
+    const abs = resolve(materialBase, ref)
     const lexicalRel = relative(root, abs)
     if (lexicalRel === '..' || lexicalRel.startsWith('../') || isAbsolute(lexicalRel)) {
       throw new Error(`material path escapes the workspace root: ${ref} (root: ${root})`)

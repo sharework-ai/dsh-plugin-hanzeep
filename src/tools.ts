@@ -5,6 +5,7 @@ import type { Config } from './config.ts'
 import { generateDocument, getDocService } from './doc-service.ts'
 import { createLlmPort } from './llm-port.ts'
 import type { Pack } from './pack.ts'
+import { effectiveWorkspaceRoot, resolveRootWithin, type SessionWorkspaceCarrier } from './paths.ts'
 import { artifactHashOf, type Receipt, type UpstreamAnchor } from './receipt.ts'
 import { severityCounts } from './issue.ts'
 
@@ -80,10 +81,11 @@ export function defineDocGenerateTool(deps: ToolDeps) {
     name: 'doc_generate',
     description: 'Generate a structured document via the pack\'s closed loop (generate → validate → repair until green). '
       + 'Returns artifactPath, markdownPath, and the validation receipt. '
-      + 'Materials are workspace-relative file paths or inline text starting with "#!inline".',
+      + 'Materials are paths relative to the materials root (default <workspace>/references/) or inline text starting with "#!inline"; '
+      + 'artifacts land under the output root (default <workspace>/output/).',
     parameters: {
       pack: { type: 'string', required: true, description: 'Pack name (e.g. cosmic-plan)' },
-      materials: { type: 'array', required: true, items: { type: 'string' }, description: 'Material references: workspace file paths or #!inline text' },
+      materials: { type: 'array', required: true, items: { type: 'string' }, description: 'Material references: paths relative to the materials root (default references/ under the workspace) or #!inline text' },
       language: { type: 'string', description: 'Output language (default: config defaultLanguage)' },
       upstream: { type: 'array', items: { type: 'string' }, description: 'Workspace-relative paths to upstream artifacts for chained packs; each must carry a green sidecar receipt (hash-verified)' },
       artifactName: { type: 'string', description: 'Output base name, plain [A-Za-z0-9._-] basename (default: <pack>-<timestamp>)' },
@@ -97,29 +99,32 @@ export function defineDocGenerateTool(deps: ToolDeps) {
       const language = resolveLanguage(deps, pack, args.language)
       const materials = args.materials as string[]
       const upstream = args.upstream as string[] | undefined
+      const workspaceRoot = effectiveWorkspaceRoot(exec as SessionWorkspaceCarrier | undefined, deps.config.workspaceRoot)
+      const materialsRoot = resolveRootWithin(workspaceRoot, deps.config.materialsRoot, 'materialsRoot')
+      const outputRoot = resolveRootWithin(workspaceRoot, deps.config.outputRoot, 'outputRoot')
       let upstreamTexts: string[] | undefined
       let upstreamAnchors: UpstreamAnchor[] | undefined
       if (pack.manifest.consumes.length > 0) {
         if (upstream === undefined || upstream.length === 0) {
           throw new Error(`pack "${pack.manifest.name}" consumes upstream artifacts [${pack.manifest.consumes.join(', ')}]; pass their workspace paths via the upstream parameter`)
         }
-        const workspaceRoot0 = deps.config.workspaceRoot ?? process.cwd()
-        const verified = await verifyUpstreamReceipts(workspaceRoot0, upstream, pack)
+        const verified = await verifyUpstreamReceipts(workspaceRoot, upstream, pack)
         upstreamTexts = verified.texts
         upstreamAnchors = verified.anchors
       }
       const route = requireRoute(deps)
       const llm = createLlmPort(deps.ctx as never, route)
       const artifactName = args.artifactName ?? `${pack.manifest.name}-${Date.now()}`
-      const workspaceRoot = deps.config.workspaceRoot ?? process.cwd()
       const result = await generateDocument({
         pack,
         language,
         materials,
+        materialsRoot,
         upstream: upstreamTexts,
         upstreamAnchors,
         artifactName,
         workspaceRoot,
+        outputRoot,
         config: deps.config,
         llm,
         signal: exec.signal,
@@ -146,9 +151,9 @@ export function defineDocValidateTool(deps: ToolDeps) {
       schema: { type: 'json' },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
-    async execute(args: { artifactPath: string; pack: string; language?: string }) {
+    async execute(args: { artifactPath: string; pack: string; language?: string }, exec) {
       const pack = resolvePack(deps, args.pack)
-      const workspaceRoot = deps.config.workspaceRoot ?? process.cwd()
+      const workspaceRoot = effectiveWorkspaceRoot(exec as SessionWorkspaceCarrier | undefined, deps.config.workspaceRoot)
       const artifactPath = confinePath(workspaceRoot, args.artifactPath, 'artifactPath')
       const raw = await readFile(artifactPath, 'utf8')
       let artifact: unknown

@@ -3,13 +3,19 @@ import z from '@deepseek-ai/schemastery'
 /** Single source of truth for tunable defaults (config.ts, not call sites). */
 export const DEFAULT_MAX_ITERATIONS = 5
 export const DEFAULT_PROMPT_TOKEN_BUDGET = 60_000
+export const DEFAULT_MATERIALS_ROOT = 'references'
+export const DEFAULT_OUTPUT_ROOT = 'output'
 
 /** Plugin configuration, overridable from cordis.yml (no hardcoded tunables). */
 export interface Config {
   /** Extra pack directories merged over the built-in packs/ (same-name wins). */
   packsDir?: string
-  /** Workspace root constraining material/artifact path resolution. */
+  /** Workspace root when no session workspace drives the call (default: cwd). */
   workspaceRoot?: string
+  /** Root material references resolve against (default: <workspace>/references). */
+  materialsRoot?: string
+  /** Root artifacts are written to (default: <workspace>/output). */
+  outputRoot?: string
   /** Default language; falls back to the first pack's first language when unset. */
   defaultLanguage?: string
   /** Repair-loop round cap. */
@@ -24,6 +30,8 @@ export interface Config {
 export const Config: z<Config> = z.object({
   packsDir: z.string(),
   workspaceRoot: z.string(),
+  materialsRoot: z.string(),
+  outputRoot: z.string(),
   defaultLanguage: z.string(),
   maxIterations: z.number().default(DEFAULT_MAX_ITERATIONS),
   promptTokenBudget: z.number().default(DEFAULT_PROMPT_TOKEN_BUDGET),
