@@ -27,16 +27,16 @@ You get an all-green receipt in seconds — zero LLM calls. This is the determin
 | Parameter | Type | Notes |
 |---|---|---|
 | `pack` | string | e.g. `cosmic-plan`; unknown names list available packs |
-| `materials` | string[] | workspace-relative file paths, or inline text starting with `#!inline` |
+| `materials` | string[] | paths relative to the materials root (default `<workspace>/references/`), or inline text starting with `#!inline` |
 | `language` | string? | default: config `defaultLanguage`, else the pack's first language |
 | `upstream` | string[]? | workspace-relative paths to upstream artifacts; each must carry a green sidecar receipt (hash-verified, pack type matched against `consumes`) |
 | `artifactName` | string? | output base name (default `<pack>-<timestamp>`) |
 
-Returns `{ artifactPath, markdownPath, receipt }`. Exhausted loops throw AND keep the draft + red receipt on disk.
+Returns `{ artifactPath, markdownPath, receipt }`. Artifacts, receipts, and markdown land in the output root (default `<workspace>/output/`). Exhausted loops throw AND keep the draft + red receipt on disk.
 
 ### `doc_validate`
 
-Re-runs the ruleset over an existing artifact — deterministic, no LLM. Returns a fresh receipt; a hash mismatch means the artifact changed after generation.
+Re-runs the ruleset over an existing artifact — deterministic, no LLM. `artifactPath` is workspace-relative (e.g. `output/plan-123.json`). Returns a fresh receipt; a hash mismatch means the artifact changed after generation.
 
 ## Configuration (cordis.yml)
 
@@ -44,13 +44,17 @@ Re-runs the ruleset over an existing artifact — deterministic, no LLM. Returns
 - id: hanzeep
   config:
     packsDir: ""            # extra pack dirs; same-name packs override built-ins
-    workspaceRoot: ""       # path containment root for materials/artifacts (default: cwd)
+    workspaceRoot: ""       # fallback root when no session workspace (default: cwd)
+    materialsRoot: ""       # material reference root (default: <workspace>/references)
+    outputRoot: ""          # artifact output root (default: <workspace>/output)
     defaultLanguage: "zh-CN"
     maxIterations: 5        # repair-loop round cap
     promptTokenBudget: 60000
     provider: "deepseek-official"  # an LLM route registered in the host (required)
     model: "deepseek-chat"
 ```
+
+**Workspace & roots**: the per-call workspace root is the session's workspace directory (the conversation's cwd — e.g. the folder picked in the dsh web UI), falling back to `workspaceRoot`, then the process cwd. `materialsRoot`/`outputRoot` may be relative (joined to the workspace root) or absolute, but must resolve INSIDE the workspace root — anything else fails loud. Material references resolve against `materialsRoot`; artifact writes (and returned `artifactPath` values) live under `outputRoot`. Containment, tamper-evident receipts, and upstream chain verification all hold against the workspace root regardless of root customization.
 
 **Provider route names**: `provider` must name a route registered in the host's LLM composition. The bundled `dsh-llm-deepseek` adapter registers as `deepseek-official` (not `deepseek`); `dsh-llm-pi-ai` registers one route per configured provider profile. An unknown route surfaces as an empty stream (`NO_ADAPTER`), not a loud error — if `doc_generate` reports an llm-error on round 1, check the adapter's registered route name first.
 
